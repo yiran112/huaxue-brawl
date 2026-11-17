@@ -95,7 +95,7 @@ export const MODES = {
   elim: { name: '淘汰赛', icon: '💀', desc: '领先者每过一个检查点，最后一名就被淘汰出局' },
   team: { name: '团队赛', icon: '🤝', desc: '红蓝 4 对 4，按名次给全队计分，队友的道具不会误伤' },
   brawl: { name: '大乱斗', icon: '🥊', desc: '道具箱翻倍，击飞一人得 3 分、被击飞扣 1 分，冲线另有加分' },
-  trick: { name: '特技赛', icon: '🤸', desc: '空翻、漂移、滞空、加速带连成连击拿分，最后比总分' },
+  trick: { name: '特技赛', icon: '🤸', desc: '空翻、转体、抓板、漂移连成技巧链，结算「总分 × 倍率」，最后比总分' },
   tt: { name: '计时赛', icon: '👻', desc: '独自滑，和自己的最好成绩（幽灵）赛跑，冲击奖牌' },
 };
 export const MODE_KEYS = Object.keys(MODES);

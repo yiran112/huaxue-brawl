@@ -6,7 +6,7 @@ import { clamp, wrapAngle } from './util.js';
 
 const SEND_MS = 50; // 每秒发 20 次状态
 const HEAD = 10; // 包头：类型 1 + 人数 1 + 发送方时间戳 8
-const REC = 32; // 每个选手一条记录的字节数
+const REC = 34; // 每个选手一条记录的字节数
 const MAX_RACERS = 8;
 const STATE_CODE = { ready: 0, ski: 1, tumble: 2 };
 const STATE_NAME = ['ready', 'ski', 'tumble', 'ski'];
@@ -174,7 +174,7 @@ export class Net {
       dv.setInt16(o + 17, i16(r.vel.z * 100), true);
       dv.setInt16(o + 19, i16(wrapAngle(r.yaw) * 10000), true);
       dv.setUint8(o + 21, (r.grounded ? 1 : 0) | ((STATE_CODE[r.state] || 0) << 1) | (r.drifting ? 8 : 0) | (vis.tuck ? 32 : 0) | (vis.brake ? 64 : 0));
-      dv.setUint8(o + 22, (r.boostT > 0 ? 1 : 0) | (r.turboT > 0 ? 2 : 0) | (r.plantT > 0 ? 4 : 0) | (r.driftDir > 0 ? 8 : 0));
+      dv.setUint8(o + 22, (r.boostT > 0 ? 1 : 0) | (r.turboT > 0 ? 2 : 0) | (r.plantT > 0 ? 4 : 0) | (r.driftDir > 0 ? 8 : 0) | (r.grabbing ? 16 : 0));
       dv.setInt8(o + 23, clamp(Math.round(vis.steer * 80), -127, 127));
       dv.setInt16(o + 24, i16(r.flip * 1000), true);
       dv.setUint8(o + 26, u8(Math.ceil(Math.max(0, r.shieldT) * 10)));
@@ -184,6 +184,7 @@ export class Net {
       const w = r.weapon ? WEAPON_KEYS.indexOf(r.weapon) : -1;
       dv.setUint8(o + 30, w < 0 ? 255 : w);
       dv.setUint8(o + 31, u8(r.ammo));
+      dv.setInt16(o + 32, i16(r.spinA * 1000), true);
       o += REC;
       n++;
     }
@@ -237,6 +238,7 @@ export class Net {
         charge: dv.getUint8(o + 29) / 50,
         weapon: WEAPON_KEYS[w] || null,
         ammo: dv.getUint8(o + 31),
+        spin: dv.getInt16(o + 32, true) / 1000,
       });
     }
   }

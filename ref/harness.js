@@ -19,12 +19,37 @@ window.__sim = (seconds, auto = true) => {
       const p = g.player;
       if (auto && p && g.state === 'race' && !p.finished) {
         p.think(dt);
-        g.keys.left = p.input.steer < -0.25;
-        g.keys.right = p.input.steer > 0.25;
+        const sp = p.input.spin;
+        g.keys.left = sp ? sp < 0 : p.input.steer < -0.25;
+        g.keys.right = sp ? sp > 0 : p.input.steer > 0.25;
         g.keys.up = p.input.tuck;
-        g.keys.down = p.input.brake;
-        g.keys.drift = p.input.drift;
+        g.keys.down = p.input.brake || p.input.grab;
+        g.keys.drift = p.input.drift || !!sp;
         g.keys.flipB = p.input.flip > 0;
+        // __autoTricks：玩家离地时按预估滞空安排空翻 / 转体 / 抓板（经由键盘）
+        const T = window.__autoTricks;
+        if (T) {
+          if (!p.grounded && p.state === 'ski') {
+            if (!T.plan) {
+              const air = p.predictAir() + p.airT;
+              T.plan = {
+                flipN: T.flip === false ? 0 : Math.max(0, Math.min(2, Math.floor((air - 0.3) / 0.85))),
+                spinN: T.spin ? Math.max(0, Math.min(2, Math.floor((air - 0.35) / 0.75))) : 0,
+                dir: Math.random() < 0.5 ? -1 : 1,
+                grabEnd: T.grab && air > 0.9 ? air - 0.35 : 0,
+              };
+            }
+            const P = T.plan;
+            g.keys.flipB = P.flipN > 0 && Math.abs(p.flip) < 6.2832 * P.flipN - 0.05;
+            const spin = P.spinN > 0 && Math.abs(p.spinA) < 6.2832 * P.spinN - 0.05;
+            g.keys.drift = spin;
+            g.keys.left = spin && P.dir < 0;
+            g.keys.right = spin && P.dir > 0;
+            g.keys.down = p.airT > 0.12 && p.airT < P.grabEnd;
+          } else {
+            T.plan = null;
+          }
+        }
       }
       g.update(dt);
     } catch (e) {

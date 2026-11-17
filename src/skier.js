@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { clamp, lerp, damp } from './util.js';
 import { SKINS } from './config.js';
-import { GEAR } from './gear.js';
+import { GEAR, rarityRank } from './gear.js';
 
 const matCache = new Map();
 export function lam(color, opts) {
@@ -157,7 +157,7 @@ export class Skier {
     this.spin.add(this.inner);
     this.group.add(this.spin);
     this.t = Math.random() * 10;
-    this.pose = { tuck: 0, lean: 0, air: 0, flail: 0, brake: 0, plant: 0 };
+    this.pose = { tuck: 0, lean: 0, air: 0, flail: 0, brake: 0, plant: 0, grab: 0 };
     this.build();
     this.group.scale.setScalar(1.22);
   }
@@ -168,11 +168,16 @@ export class Skier {
     const skin = L.skin < 16 ? SKINS[L.skin] : L.skin;
     const boot = 0x2e3038;
     const gear = (this.gear = GEAR_IDS.has(L.gear) ? L.gear : 'ski');
-    // 雪橇 / 充气圈是坐着滑：整个人往下沉，腿往前伸
-    this.sitDrop = gear === 'sled' ? 0.34 : gear === 'tube' ? 0.26 : 0;
-    this.legBase = gear === 'sled' ? 1.35 : gear === 'tube' ? 1.15 : 0;
+    const def = GEAR[gear];
+    // form 决定站姿和模型：同一种滑法的 C/B/A/S 共用一套骨架，稀有度只改尺寸和装饰
+    const form = (this.form = def.form || 'ski');
+    const rank = rarityRank(def.rarity);
+    const trim = def.trim ?? 0xffffff;
+    // 雪橇 / 雪圈是坐着滑：整个人往下沉，腿往前伸
+    this.sitDrop = form === 'sled' ? 0.34 : form === 'tube' ? 0.26 : 0;
+    this.legBase = form === 'sled' ? 1.35 : form === 'tube' ? 1.15 : 0;
     this.seatLean = this.sitDrop > 0 ? 0.38 : 0;
-    this.armSpread = gear === 'board' ? 0.55 : 0;
+    this.armSpread = form === 'board' ? 0.55 : 0;
     inner.position.y = -0.75 - this.sitDrop;
     this.vehicle = null;
 
@@ -190,13 +195,7 @@ export class Skier {
       this.legs.push(leg);
       const g = new THREE.Group();
       g.position.set(sx * 0.17, 0.02, 0);
-      if (gear === 'ski') {
-        g.add(mesh('box', L.ski, 0.115, 0.035, 1.7, 0, 0, -0.08));
-        const tip = mesh('box', L.ski, 0.115, 0.035, 0.26, 0, 0.045, -1.03);
-        tip.rotation.x = 0.45;
-        g.add(tip);
-        g.add(mesh('box', 0x20222a, 0.12, 0.05, 0.3, 0, 0.03, 0.02));
-      }
+      if (form === 'ski') this.buildSki(g, L.ski, rank, trim);
       hold.add(g);
       this.skis.push(g);
       // 靴子与腿
@@ -204,7 +203,7 @@ export class Skier {
       hold.add(limb(L.pants, sx * 0.17, 0.26, 0.04, sx * 0.18, 0.5, -0.14, 0.105));
       hold.add(limb(L.pants, sx * 0.18, 0.5, -0.14, sx * 0.13, 0.72, 0.1, 0.12));
     }
-    this.buildVehicle(gear, L);
+    this.buildVehicle(form, L, rank, trim);
 
     // 躯干
     this.torso = new THREE.Group();
@@ -251,7 +250,8 @@ export class Skier {
       pole.add(mesh('cyl', 0xff6fae, 0.016, 1.15, 0.016, 0, -0.5, 0));
       pole.add(mesh('cyl', 0x20222a, 0.05, 0.02, 0.05, 0, -1.0, 0));
       pole.rotation.x = -1.05;
-      pole.visible = gear === 'ski';
+      pole.visible = form === 'ski';
+      if (form === 'ski' && rank >= 2) pole.children[0].material = lam(trim);
       arm.add(pole);
       this.torso.add(arm);
       this.arms.push(arm);
@@ -342,43 +342,82 @@ export class Skier {
     this.group.add(this.ice);
   }
 
-  // 单板 / 雪橇 / 充气圈。挂在 inner 上，跟着人一起压弯；inner 下沉了多少，这里就抬回多少，正好贴地
-  buildVehicle(gear, L) {
-    if (gear === 'ski') return;
+  // 双板挂在两只脚上。rank 0 是原来的入门双板；更高稀有度更长，并加上装饰条
+  buildSki(g, color, rank, trim) {
+    const len = 1.7 + rank * 0.16;
+    const z = -0.08 - rank * 0.05;
+    g.add(mesh('box', color, 0.115, 0.035, len, 0, 0, z));
+    const tip = mesh('box', color, 0.115, 0.035, 0.26, 0, 0.045, z - len / 2 - 0.1);
+    tip.rotation.x = 0.45;
+    g.add(tip);
+    g.add(mesh('box', 0x20222a, 0.12, 0.05, 0.3, 0, 0.03, 0.02));
+    if (rank >= 1) g.add(mesh('box', trim, 0.03, 0.04, len * 0.72, 0, 0.02, z));
+    if (rank >= 2) {
+      for (const sx of [-1, 1]) g.add(mesh('box', trim, 0.018, 0.02, len * 0.88, sx * 0.055, 0.012, z));
+    }
+    if (rank >= 3) g.add(mesh('box', trim, 0.07, 0.028, 0.2, 0, 0.05, z - len / 2 + 0.02, { emissive: trim }));
+  }
+
+  // 单板 / 雪橇 / 雪圈。挂在 inner 上，跟着人一起压弯；inner 下沉了多少，这里就抬回多少，正好贴地。
+  // B 级（单板、雪橇、充气圈）保持原来的尺寸，其它稀有度在这套骨架上放大或缩小。
+  buildVehicle(form, L, rank, trim) {
+    if (form === 'ski') return;
     const v = (this.vehicle = new THREE.Group());
     const y0 = this.sitDrop;
-    if (gear === 'board') {
-      v.add(mesh('box', L.ski, 0.5, 0.04, 1.5, 0, y0 + 0.02, -0.05));
+    const glow = rank >= 3 ? { emissive: trim } : undefined;
+    if (form === 'board') {
+      const d = rank - 1;
+      const w = 0.5 + d * 0.05;
+      const len = 1.5 + d * 0.14;
+      v.add(mesh('box', L.ski, w, 0.04, len, 0, y0 + 0.02, -0.05));
       for (const s of [-1, 1]) {
-        const end = mesh('box', L.ski, 0.5, 0.04, 0.22, 0, y0 + 0.06, -0.05 + s * 0.83);
+        const end = mesh('box', L.ski, w, 0.04, 0.22, 0, y0 + 0.06, -0.05 + s * (len / 2 + 0.08));
         end.rotation.x = -s * 0.4;
         v.add(end);
       }
-      v.add(mesh('box', 0xffffff, 0.12, 0.045, 1.2, 0, y0 + 0.025, -0.05));
+      v.add(mesh('box', trim, 0.12 + Math.max(0, d) * 0.02, 0.045, len * 0.8, 0, y0 + 0.025, -0.05, glow));
       for (const sx of [-1, 1]) v.add(mesh('box', 0x20222a, 0.16, 0.08, 0.24, sx * 0.17, y0 + 0.07, 0.02));
-    } else if (gear === 'sled') {
-      v.add(mesh('box', L.ski, 0.7, 0.1, 1.55, 0, y0 + 0.24, -0.3));
-      v.add(mesh('box', 0xffffff, 0.72, 0.03, 0.12, 0, y0 + 0.3, -0.3));
-      const curl = mesh('box', L.ski, 0.7, 0.1, 0.4, 0, y0 + 0.4, -1.17);
+      if (rank >= 2) {
+        for (const sx of [-1, 1]) v.add(mesh('box', trim, 0.028, 0.02, len * 0.82, sx * (w / 2 - 0.01), y0 + 0.03, -0.05));
+      }
+    } else if (form === 'sled') {
+      const d = rank - 1;
+      const w = 0.7 + d * 0.04;
+      const len = 1.55 + d * 0.14;
+      const rail = rank === 0 ? trim : rank >= 2 ? trim : 0x9aa0ac;
+      v.add(mesh('box', L.ski, w, 0.1, len, 0, y0 + 0.24, -0.3));
+      v.add(mesh('box', rank >= 2 ? trim : 0xffffff, w + 0.02, 0.03, 0.12, 0, y0 + 0.3, -0.3, glow));
+      const curl = mesh('box', L.ski, w, 0.1, 0.4, 0, y0 + 0.4, -0.3 - len / 2 - 0.095);
       curl.rotation.x = 0.9;
       v.add(curl);
       for (const sx of [-1, 1]) {
-        v.add(mesh('box', 0x9aa0ac, 0.05, 0.05, 1.8, sx * 0.3, y0 + 0.03, -0.35));
-        const tip = mesh('box', 0x9aa0ac, 0.05, 0.05, 0.3, sx * 0.3, y0 + 0.12, -1.3);
+        v.add(mesh('box', rail, 0.05, 0.05, len + 0.25, sx * 0.3, y0 + 0.03, -0.35));
+        const tip = mesh('box', rail, 0.05, 0.05, 0.3, sx * 0.3, y0 + 0.12, -0.35 - (len + 0.25) / 2 - 0.05);
         tip.rotation.x = 0.8;
         v.add(tip);
         for (const z of [0.2, -0.4, -0.95]) v.add(mesh('box', 0x6f7883, 0.04, 0.2, 0.04, sx * 0.3, y0 + 0.13, z));
       }
       v.add(limb(0xffd23c, -0.3, y0 + 0.45, -1.25, 0.3, y0 + 0.45, -1.25, 0.02));
+      if (rank >= 3) v.add(mesh('box', trim, 0.22, 0.08, 0.22, 0, y0 + 0.38, 0.2, glow));
     } else {
-      const torus = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.27, 10, 22), lam(L.ski));
+      const d = rank - 1;
+      const rad = 0.6 + d * 0.07;
+      const thick = 0.27 + d * 0.035;
+      const torus = new THREE.Mesh(new THREE.TorusGeometry(rad, thick, 10, 22), lam(L.ski));
       torus.rotation.x = Math.PI / 2;
       torus.position.set(0, y0 + 0.27, -0.05);
       torus.castShadow = true;
       this.ownGeos = [torus.geometry];
       v.add(torus);
+      if (rank >= 2) {
+        const inner = new THREE.Mesh(new THREE.TorusGeometry(rad * 0.62, 0.045, 8, 18), lam(trim, glow));
+        inner.rotation.x = Math.PI / 2;
+        inner.position.copy(torus.position);
+        this.ownGeos.push(inner.geometry);
+        v.add(inner);
+      }
       v.add(mesh('cyl', 0x2b2f3a, 0.36, 0.06, 0.36, 0, y0 + 0.12, -0.05));
-      for (const sx of [-1, 1]) v.add(mesh('box', 0x20222a, 0.07, 0.1, 0.22, sx * 0.72, y0 + 0.42, -0.05));
+      for (const sx of [-1, 1]) v.add(mesh('box', rank >= 2 ? trim : 0x20222a, 0.07, 0.1, 0.22, sx * (0.72 + (rank - 1) * 0.08), y0 + 0.42, -0.05, glow));
     }
     this.inner.add(v);
   }
@@ -529,32 +568,42 @@ export class Skier {
     p.air = lerp(p.air, s.grounded ? 0 : 1, k);
     p.flail = lerp(p.flail, s.tumbling ? 1 : 0, damp(14, dt));
     p.brake = lerp(p.brake, s.brake ? 1 : 0, k);
+    p.grab = lerp(p.grab, s.grab ? 1 : 0, damp(14, dt));
     const t = this.t;
     const fl = p.flail;
     const frozen = s.frozen ? 0 : 1;
+    // 抓板：站着滑的人收腿弯腰、右手去够板、左手甩开；坐着滑的人往后仰、举手、车头翘起来
+    const gb = p.grab * (1 - fl);
+    const sit = this.sitDrop > 0;
 
-    this.inner.rotation.z = -p.lean * 0.42 * (1 - fl);
-    this.torso.rotation.x = -(0.45 + p.tuck * 0.5 - p.air * 0.2 - p.brake * 0.25) + this.seatLean + fl * Math.sin(t * 17) * 0.5;
+    this.inner.rotation.z = -p.lean * 0.42 * (1 - fl) + (sit ? 0 : gb * 0.32);
+    this.inner.rotation.x = -gb * (sit ? 0.35 : 0.22);
+    this.torso.rotation.x = -(0.45 + p.tuck * 0.5 - p.air * 0.2 - p.brake * 0.25) + this.seatLean + fl * Math.sin(t * 17) * 0.5 + gb * (sit ? 0.45 : -0.75);
     this.torso.rotation.z = -p.lean * 0.15;
-    this.head.rotation.x = 0.3 + p.tuck * 0.35 - this.seatLean * 0.5;
+    this.head.rotation.x = 0.3 + p.tuck * 0.35 - this.seatLean * 0.5 + gb * (sit ? -0.3 : 0.45);
     const wob = Math.sin(t * 9) * 0.04 * clamp(s.speed / 30, 0, 1) * frozen;
     const base = 0.25 - p.tuck * 1.0 + p.air * 1.2 + p.brake * 0.4 + (s.hasProp ? -0.2 : 0);
     const spread = this.armSpread * (1 - fl);
-    this.arms[0].rotation.x = base + wob + fl * Math.sin(t * 21) * 1.6;
-    this.arms[1].rotation.x = base - wob + fl * Math.sin(t * 19 + 1.7) * 1.6 + (s.hasProp ? -0.9 : 0);
-    this.arms[0].rotation.z = -p.air * 0.7 - fl * 0.8 - p.brake * 0.3 - spread;
-    this.arms[1].rotation.z = p.air * 0.7 + fl * 0.8 + p.brake * 0.3 + spread;
+    const a0 = base + wob + fl * Math.sin(t * 21) * 1.6;
+    const a1 = base - wob + fl * Math.sin(t * 19 + 1.7) * 1.6 + (s.hasProp ? -0.9 : 0);
+    this.arms[0].rotation.x = lerp(a0, sit ? 2.9 : 0.6, gb);
+    this.arms[1].rotation.x = lerp(a1, sit ? 0.2 : 0.35, gb);
+    this.arms[0].rotation.z = lerp(-p.air * 0.7 - fl * 0.8 - p.brake * 0.3 - spread, sit ? -0.3 : -1.5, gb);
+    this.arms[1].rotation.z = lerp(p.air * 0.7 + fl * 0.8 + p.brake * 0.3 + spread, sit ? 0.5 : -0.25, gb);
     this.animateExtras(dt, s);
     const wedge = p.brake * 0.28;
-    this.skis[0].rotation.y = -wedge + fl * Math.sin(t * 13) * 0.7;
-    this.skis[1].rotation.y = wedge + fl * Math.sin(t * 15 + 2) * 0.7;
+    // 双板抓板时两块板交叉成 X
+    const cross = this.form === 'ski' ? gb * 0.42 : 0;
+    this.skis[0].rotation.y = -wedge + fl * Math.sin(t * 13) * 0.7 + cross;
+    this.skis[1].rotation.y = wedge + fl * Math.sin(t * 15 + 2) * 0.7 - cross;
     this.skis[0].rotation.x = p.air * 0.12;
     this.skis[1].rotation.x = p.air * 0.12;
     // 翻滚时两腿乱晃；倒插在雪里时一前一后使劲蹬
     p.plant = lerp(p.plant, s.planted ? 1 : 0, damp(12, dt));
     const kick = fl * 0.25 + p.plant * 0.55;
-    this.legs[0].rotation.x = this.legBase + Math.sin(t * 15) * kick;
-    this.legs[1].rotation.x = this.legBase - Math.sin(t * 15) * kick;
+    const knee = this.form === 'ski' ? gb * 0.75 : 0;
+    this.legs[0].rotation.x = this.legBase + Math.sin(t * 15) * kick + knee;
+    this.legs[1].rotation.x = this.legBase - Math.sin(t * 15) * kick + knee;
 
     // 加特林：枪口放平朝前，开火时枪管飞转、枪身抖动
     if (this.propGatling.visible) {

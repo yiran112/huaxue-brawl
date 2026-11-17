@@ -149,6 +149,13 @@ export const CHALLENGES = [
     reward: { coins: 300, xp: 200 },
   },
   {
+    id: 'combo', name: '连招达人', icon: '🔗', lv: 4, track: 'lumber', mode: 'speed',
+    desc: '结算一条 ×6 以上的技巧链：空翻、转体、抓板、漂移连着做，别摔',
+    rules: { bots: 3, difficulty: 0 },
+    test: (r) => r.bestMult >= 6, prog: (r) => `最高 ×${r.bestMult} · 最高单条 ${r.bestChain.toLocaleString()}`,
+    reward: { coins: 350, xp: 200 },
+  },
+  {
     id: 'freeze', name: '冰封千里', icon: '🧊', lv: 5, track: 'crystal', mode: 'race',
     desc: '道具只刷冰冻枪，冻住对手 3 次',
     rules: { bots: 7, difficulty: 1, itemRate: 2, only: ['freeze'] },
@@ -193,9 +200,9 @@ export const CHALLENGES = [
   },
   {
     id: 'trick', name: '特技表演', icon: '🌟', lv: 11, track: 'aurora', mode: 'trick',
-    desc: '特技赛单局拿到 7000 分',
+    desc: '特技赛单局拿到 20000 分（技巧链越长倍率越高）',
     rules: { bots: 5, difficulty: 1 },
-    test: (r) => r.score >= 7000, prog: (r) => `${r.score} / 7000`,
+    test: (r) => r.score >= 20000, prog: (r) => `${r.score.toLocaleString()} / 20,000`,
     reward: { coins: 500, xp: 300 },
   },
   {

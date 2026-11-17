@@ -20,7 +20,7 @@ export class GhostRecorder {
     if (t < this.nextT) return;
     this.nextT = t + 1 / HZ;
     const f = this.frames;
-    f.push(+t.toFixed(2), +r.pos.x.toFixed(2), +r.pos.y.toFixed(2), +r.pos.z.toFixed(2), +r.yaw.toFixed(3), +(r.flip + (r.grounded ? 100 : 0)).toFixed(2));
+    f.push(+t.toFixed(2), +r.pos.x.toFixed(2), +r.pos.y.toFixed(2), +r.pos.z.toFixed(2), +(r.yaw + r.spinA).toFixed(3), +(r.flip + (r.grounded ? 100 : 0)).toFixed(2));
   }
 }
 

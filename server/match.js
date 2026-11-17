@@ -3,7 +3,7 @@
 // 也能挂在独立的 Node 服务器上（见 server/index.js）。
 import { WebSocketServer } from 'ws';
 import { THEME_KEYS, LOOK_PRESETS, BOT_NAMES } from '../src/config.js';
-import { GEAR_KEYS, GOGGLES, BACKS, SCARVES, TRAILS } from '../src/gear.js';
+import { GEAR_KEYS, GOGGLES, BACKS, SCARVES, TRAILS, pickBotGear } from '../src/gear.js';
 
 const MAX_PLAYERS = 8;
 const WAIT_MS = 20000; // 房间建好后最多等这么久就开赛
@@ -54,7 +54,7 @@ function botLook(k) {
   const r = (n, p) => (Math.random() < p ? 0 : 1 + Math.floor(Math.random() * n));
   return {
     ...LOOK_PRESETS[1 + (k % 7)],
-    gear: pick(['ski', 'ski', 'ski', 'board', 'board', 'sled', 'tube']),
+    gear: pickBotGear(1),
     goggles: r(3, 0.5),
     back: r(4, 0.55),
     scarf: r(2, 0.6),

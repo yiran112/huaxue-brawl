@@ -1,7 +1,7 @@
 // 雪山大乱斗 - 主程序
 import * as THREE from 'three';
 import { THEMES, THEME_KEYS, LENGTHS, LOOK_PRESETS, BOT_NAMES, DEFAULT_RULES, POINTS, SKINS, MODES, WEAPON_KEYS } from './config.js';
-import { GEAR, LOOK_EXTRA_DEFAULTS, COSMETIC_SLOTS, uniformUp } from './gear.js';
+import { GEAR, LOOK_EXTRA_DEFAULTS, COSMETIC_SLOTS, uniformUp, pickBotGear } from './gear.js';
 import { TRACK_MAP, CUP_MAP, CHALLENGE_MAP, TROPHY, TROPHY_NAME } from './tracks.js';
 import { Profile } from './profile.js';
 import { makeMode, TEAM_NAMES } from './modes.js';
@@ -14,6 +14,7 @@ import { FX, Snowfall, COL } from './fx.js';
 import { Sfx } from './audio.js';
 import { Items, Weapons, Deer } from './weapons.js';
 import { buildArch, buildChairlift, glowTexture, canvasTex } from './props.js';
+import { Showroom, STAGE_TOP } from './showroom.js';
 import { UI, esc } from './ui.js';
 import { Net } from './net.js';
 import { clamp, lerp, damp, wrapAngle, fmtTime } from './util.js';
@@ -47,6 +48,11 @@ const IMPACT_VIEW_DIST = 70;
 // 大厅镜头要框住的范围（米）：整台缆车的宽度、从雪板到帽顶的高度，都留了点边
 const LIFT_W = 10.6;
 const LIFT_H = 4.8;
+// 展厅镜头要框住的范围：整个展台的宽度、从台面到帽顶的高度
+const SHOW_W = 6.2;
+const SHOW_H = 4.3;
+// 展厅里固定的打光方向（从镜头右上方照向角色），不跟赛道主题走
+const SHOW_SUN = new THREE.Vector3(0.45, 0.8, 0.6).normalize();
 const NO_ITEMS = { nearestAhead: () => null, update() {}, take() {}, dispose() {} };
 
 class Game {
@@ -296,14 +302,13 @@ class Game {
   }
 
   // 机器人：预设外观 + 随机装备和配饰
-  genBotLooks() {
-    const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  genBotLooks(difficulty = 1) {
     const r = (n, p) => (Math.random() < p ? 0 : 1 + Math.floor(Math.random() * n));
     this.botLooks = [];
     for (let i = 0; i < 7; i++) {
       this.botLooks.push({
         ...LOOK_PRESETS[1 + i],
-        gear: pick(['ski', 'ski', 'ski', 'board', 'board', 'sled', 'tube']),
+        gear: pickBotGear(difficulty),
         goggles: r(3, 0.5),
         back: r(4, 0.55),
         scarf: r(2, 0.6),
@@ -486,12 +491,56 @@ class Game {
     this.look[k] = v;
     save(LS_LOOK, this.look);
     if (this.state === 'menu') this.buildLobby();
+    this.syncShow();
+  }
+
+  // ---------- 展厅（成长 / 车库 / 角色页的背景） ----------
+  // label：展台背后的全息大字，传 null 表示回到缆车大厅；
+  // gear：车库里正在看的装备，可以是还没拥有的，只用来预览
+  setShow(label, gear) {
+    this.showLabel = label || null;
+    this.showGear = gear || null;
+    this.syncShow();
+  }
+
+  // 按当前状态进出展厅；force === false 时强制退出（开赛前调用）
+  syncShow(force) {
+    const on = force !== false && !!this.showLabel && this.state === 'menu' && !this.netMode;
+    if (on && !this.showroom) {
+      this.showroom = new Showroom();
+      this.scene.add(this.showroom.group);
+    }
+    const room = this.showroom;
+    if (!room) return;
+    if (on) {
+      room.setLabel(this.showLabel);
+      room.setLook(this.showGear ? { ...this.look, gear: this.showGear } : this.look);
+      if (!room.group.visible) {
+        // 放到起点上空很高的地方，四周的山够不着
+        room.group.position.set(0, this.course.height(0, 36) + 700, 36);
+        room.group.visible = true;
+        this.lobbyCam = null;
+      }
+    } else if (room.group.visible) {
+      room.group.visible = false;
+      this.lobbyCam = null;
+      // 把雪山和灯光换回来
+      const th = this.theme;
+      this.hemi.color.set(th.hemiSky);
+      this.hemi.groundColor.set(th.hemiGround);
+      this.hemi.intensity = th.hemiInt;
+      this.sun.color.set(th.sunColor);
+      this.sun.intensity = th.sunInt;
+      this.course.group.visible = true;
+      if (this.lobby) this.lobby.visible = true;
+      if (this.snowfall) this.snowfall.points.visible = true;
+    }
   }
 
   // ---------- 比赛流程 ----------
-  shuffleBots() {
+  shuffleBots(difficulty = 1) {
     this.botNames = BOT_NAMES.slice().sort(() => Math.random() - 0.5);
-    this.genBotLooks();
+    this.genBotLooks(difficulty);
   }
 
   // 快速赛：按菜单里选的模式 / 赛道
@@ -499,7 +548,7 @@ class Game {
     this.session = { kind: 'quick', mode: this.soloRules.mode, track: this.soloRules.track };
     this.round = 1;
     this.points = new Array(8).fill(0);
-    this.shuffleBots();
+    this.shuffleBots(this.soloRules.difficulty ?? 1);
     this.startRace(true);
   }
 
@@ -510,7 +559,7 @@ class Game {
     this.session = { kind: 'cup', cup: id, mode: 'race', raceIdx: 0 };
     this.round = 1;
     this.points = new Array(8).fill(0);
-    this.shuffleBots();
+    this.shuffleBots(CUP_MAP[id].difficulty ?? 1);
     this.startRace(true);
   }
 
@@ -520,7 +569,7 @@ class Game {
     this.session = { kind: 'challenge', chal: id, mode: ch.mode, track: ch.track };
     this.round = 1;
     this.points = new Array(8).fill(0);
-    this.shuffleBots();
+    this.shuffleBots(ch.rules.difficulty ?? 1);
     this.startRace(true);
   }
 
@@ -607,7 +656,11 @@ class Game {
 
   // 一局里玩家自己的统计（结算奖励、挑战判定用）
   newReport() {
-    return { hits: 0, hitsBy: {}, knocked: 0, knockedBy: {}, flips: 0, maxFlip: 0, driftBoosts: 0, bigDrifts: 0, shortcuts: 0, pads: 0, maxSpeed: 0, maxAir: 0 };
+    return {
+      hits: 0, hitsBy: {}, knocked: 0, knockedBy: {}, flips: 0, maxFlip: 0, spins: 0, maxSpin: 0, grabs: 0, maxGrab: 0,
+      driftBoosts: 0, bigDrifts: 0, shortcuts: 0, pads: 0, maxSpeed: 0, maxAir: 0,
+      skill: 0, chains: 0, bestChain: 0, bestMult: 0, breaks: 0,
+    };
   }
 
   playerReport(rank, teamWin = false) {
@@ -637,6 +690,7 @@ class Game {
     r.boostT = 0;
     r.hookT = 0;
     r.drifting = false;
+    r.chain.reset();
     if (this.nearCamera(r.pos, 220)) {
       this.fx.snowBurst(r.pos, 20, 10);
       this.fx.ring(r.pos, 5, 0xff4a50, 0.45);
@@ -667,6 +721,7 @@ class Game {
     this.ui.showPause(false);
     this.paused = false;
     this.disposeLobby();
+    this.syncShow(false);
     if (newCourse) this.buildWorld();
     else this.clearRace();
     const online = this.net.active;
@@ -1051,6 +1106,7 @@ class Game {
   onKnock(victim, source, cause, frozen, fromNet) {
     if (!fromNet) this.net.ev('kn', { v: victim.idx, s: source ? source.idx : -1, c: cause, f: frozen ? 1 : 0 });
     this.mode.onKnock(victim, source, frozen);
+    if (source && source.owned && victim !== source && !source.out && !source.finished) source.chain.add(frozen ? '冻住对手' : '击中对手', 150);
     const rep = this.rep;
     if (source && source.isPlayer && victim !== source) {
       rep.hits++;
@@ -1219,16 +1275,65 @@ class Game {
     }
   }
 
-  // 翻跟头落地成功
-  onTrick(r, name, n) {
-    if (this.nearCamera(r.pos, 130)) this.fx.ring(r.pos, 3.5 + n, 0xffe066, 0.35);
-    this.mode.onTrick(r, name, n);
+  // 空翻 / 转体落地成功。kind：'flip' | 'spin'
+  onTrick(r, name, n, kind = 'flip') {
+    if (this.nearCamera(r.pos, 130)) this.fx.ring(r.pos, 3.5 + n, kind === 'spin' ? 0x7fe0ff : 0xffe066, 0.35);
+    this.mode.onTrick(r, name, n, kind);
     if (!r.isPlayer) return;
-    this.rep.flips += n;
-    this.rep.maxFlip = Math.max(this.rep.maxFlip, n);
-    this.ui.banner(`${name}${n > 1 ? ' ×' + n : ''}！落地加速`, 'good', 1.3);
+    if (kind === 'spin') {
+      this.rep.spins += n;
+      this.rep.maxSpin = Math.max(this.rep.maxSpin, n);
+    } else {
+      this.rep.flips += n;
+      this.rep.maxFlip = Math.max(this.rep.maxFlip, n);
+    }
+  }
+
+  // 一次腾空落地，做成了哪些动作（parts：动作名；grab：成功的抓板时长，没有为 0）
+  onLanded(r, parts, grab) {
+    if (!r.isPlayer) return;
+    if (grab > 0) {
+      this.rep.grabs++;
+      this.rep.maxGrab = Math.max(this.rep.maxGrab, grab);
+    }
+    this.ui.banner(`${parts.join(' + ')}！`, 'good', 1.3);
     this.sfx.tone('triangle', 660, 1320, 0.2, 0.3);
     this.sfx.whoosh(0.7);
+  }
+
+  // 抓着板落地
+  onSloppy(r) {
+    if (!r.isPlayer) return;
+    this.tip('抓着板落地没站稳！落地前要松开 S', 1.8);
+    this.sfx.tone('square', 220, 140, 0.15, 0.2);
+  }
+
+  // ---------- 技巧链 ----------
+  onChainAdd(r, label, pts, mult) {
+    if (!r.isPlayer) return;
+    this.sfx.tone('sine', 420 + mult * 70, 560 + mult * 90, 0.08, 0.12);
+  }
+
+  onChainBank(r, total, mult, n) {
+    this.mode.onChainBank(r, total, mult, n);
+    if (mult >= 3 && this.nearCamera(r.pos, 130)) this.fx.ring(r.pos, 3 + mult * 0.4, 0xffd23c, 0.4);
+    if (!r.isPlayer) return;
+    const rep = this.rep;
+    rep.skill += total;
+    rep.chains++;
+    rep.bestChain = Math.max(rep.bestChain, total);
+    rep.bestMult = Math.max(rep.bestMult, mult);
+    this.ui.chainPop(`技巧链 ×${mult}`, `+${total.toLocaleString()}`, mult >= 5 ? 'gold' : 'good');
+    this.sfx.tone('triangle', 520, 1040 + mult * 60, 0.28, 0.3);
+    if (mult >= 5) this.sfx.whoosh(0.8);
+  }
+
+  onChainBreak(r, lost, mult, why) {
+    this.mode.onChainBreak(r, lost, mult);
+    if (!r.isPlayer) return;
+    this.rep.breaks++;
+    this.ui.chainPop('连招中断', `−${lost.toLocaleString()}`, 'bad');
+    this.sfx.tone('sawtooth', 300, 110, 0.3, 0.22);
   }
 
   // 漂移蓄力喷射
@@ -1246,6 +1351,7 @@ class Game {
   onPad(r) {
     if (this.nearCamera(r.pos, 90)) this.fx.ring(r.pos, 2.6, 0x3fc8ff, 0.28);
     this.mode.onPad(r);
+    r.chain.add('加速带', 60);
     if (!r.isPlayer) return;
     this.rep.pads++;
     this.sfx.whoosh(0.8);
@@ -1260,6 +1366,7 @@ class Game {
       if (r.scDone.has(b)) continue;
       r.scDone.add(b);
       this.mode.onShortcut(r);
+      if (r.owned) r.chain.add('抄近道', 400);
       if (!r.isPlayer) continue;
       this.rep.shortcuts++;
       this.ui.banner('抄近道成功！', 'good', 1.6);
@@ -1335,6 +1442,17 @@ class Game {
     p.input.drift = k.drift;
     if (p.grounded) this.spaceFlip = false;
     p.input.flip = k.flipB || this.spaceFlip ? 1 : k.flipF ? -1 : 0;
+    // 空中：漂移键 + 方向 = 转体，S = 抓板。离地前就按着的不算，得松开重按（免得漂移 / 刹车带进空中误触）
+    if (p.grounded) {
+      this.airDriftHeld = k.drift;
+      this.airGrabHeld = k.down;
+    } else {
+      if (!k.drift) this.airDriftHeld = false;
+      if (!k.down) this.airGrabHeld = false;
+    }
+    const air = !p.grounded && p.state === 'ski';
+    p.input.spin = air && k.drift && !this.airDriftHeld ? target : 0;
+    p.input.grab = air && k.down && !this.airGrabHeld;
     if (this.jumpQ) {
       p.input.jump = true;
       this.jumpQ = false;
@@ -1379,14 +1497,13 @@ class Game {
     this.sun.target.updateMatrixWorld();
   }
 
-  updateLobby(dt) {
-    for (const s of this.lobbySkiers) s.update(dt, {});
-    const g = this.lobby.position;
+  // 界面占掉了屏幕四周：镜头退到宽 w、高 h（米）的东西刚好放进中间的空地，再平移，让它落在空地正中。
+  // 返回平滑后的平移量和距离
+  frameCam(dt, w, h, near, far) {
     const cam = this.camera;
-    // 界面占掉了屏幕四周：镜头退到整台缆车刚好放进中间的空地，再平移，让缆车落在空地正中
     const f = this.ui.lobbyFrame();
     const tan = Math.tan((cam.fov * Math.PI) / 360);
-    const dist = clamp(Math.max(LIFT_W / (2 * tan * cam.aspect * f.w), LIFT_H / (2 * tan * f.h)), 9, 32);
+    const dist = clamp(Math.max(w / (2 * tan * cam.aspect * f.w), h / (2 * tan * f.h)), near, far);
     const tx = (0.5 - f.cx) * 2 * tan * dist * cam.aspect;
     const ty = (f.cy - 0.5) * 2 * tan * dist;
     // 切换面板、缩放窗口时平滑过渡
@@ -1395,6 +1512,40 @@ class Game {
     lc.x = lerp(lc.x, tx, k);
     lc.y = lerp(lc.y, ty, k);
     lc.dist = lerp(lc.dist, dist, k);
+    return lc;
+  }
+
+  // 展厅：镜头略微俯视展台，灯光固定，雪山和缆车先藏起来
+  updateShow(dt) {
+    const room = this.showroom;
+    room.update(dt);
+    const p = room.group.position;
+    const cam = this.camera;
+    const lc = this.frameCam(dt, SHOW_W, SHOW_H, 4.5, 14);
+    const ax = p.x + lc.x;
+    const ay = p.y + STAGE_TOP + 0.9 + lc.y;
+    cam.position.set(ax + Math.sin(this.time * 0.3) * 0.3, ay + lc.dist * 0.13, p.z + lc.dist);
+    cam.lookAt(ax, ay, p.z);
+    this.hemi.color.set(0xb4c8ff);
+    this.hemi.groundColor.set(0x33448c);
+    this.hemi.intensity = 1.7;
+    this.sun.color.set(0xffffff);
+    this.sun.intensity = 3.4;
+    this.sun.castShadow = false; // 展台上用一团假阴影就够了；回到大厅时 focusShadow 会按设置重新打开
+    this.sun.position.copy(p).addScaledVector(SHOW_SUN, 240);
+    this.sun.target.position.copy(p);
+    this.sun.target.updateMatrixWorld();
+    this.course.group.visible = false;
+    if (this.lobby) this.lobby.visible = false;
+    if (this.snowfall) this.snowfall.points.visible = false;
+  }
+
+  updateLobby(dt) {
+    if (this.showroom && this.showroom.group.visible) return this.updateShow(dt);
+    for (const s of this.lobbySkiers) s.update(dt, {});
+    const g = this.lobby.position;
+    const cam = this.camera;
+    const lc = this.frameCam(dt, LIFT_W, LIFT_H, 9, 32);
     const ax = g.x + lc.x;
     const ay = g.y + 0.95 + lc.y;
     cam.position.set(ax + Math.sin(this.time * 0.25) * 0.6, ay + 0.25 + Math.sin(this.time * 0.4) * 0.15, g.z + lc.dist);
@@ -1454,6 +1605,11 @@ class Game {
 
   // 冲线。t：用时（联机时别人的用时由他自己报过来）
   finishRacer(r, t) {
+    // 冲线时手上的技巧链直接结算
+    if (r.owned && !r.out) {
+      if (r.drifting) r.endDrift(true, false);
+      r.chain.bank();
+    }
     r.finished = true;
     r.finishTime = t;
     this.finishCount++;

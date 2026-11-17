@@ -32,6 +32,8 @@ class BaseMode {
   onDrift() {}
   onShortcut() {}
   onPad() {}
+  onChainBank() {}
+  onChainBreak() {}
   onFinish() {
     this.finishN++;
   }
@@ -163,69 +165,16 @@ class BrawlMode extends BaseMode {
   }
 }
 
-// 特技赛：空翻、漂移喷射、滞空、近道、加速带都能得分，连着做有连击加成
-const COMBO_T = 3.5;
-const TRICK_FINISH = [1000, 800, 600, 500, 400, 300, 200, 100];
+// 特技赛：只算结算成功的技巧链（总分 × 倍率），冲线按名次另加分
+const TRICK_FINISH = [3000, 2400, 1900, 1500, 1200, 900, 600, 300];
 class TrickMode extends BaseMode {
   constructor(game, key) {
     super(game, key);
     this.scored = true;
   }
 
-  setup() {
-    super.setup();
-    const n = this.game.racers.length;
-    this.combo = new Array(n).fill(0);
-    this.comboT = new Array(n).fill(-99);
-    this.air = new Array(n).fill(0);
-  }
-
-  mult(i) {
-    return 1 + 0.25 * (Math.min(this.combo[i], 9) - 1);
-  }
-
-  add(r, pts, label) {
-    const i = r.idx;
-    const now = this.game.raceTime;
-    this.combo[i] = now - this.comboT[i] < COMBO_T ? this.combo[i] + 1 : 1;
-    this.comboT[i] = now;
-    const v = Math.round(pts * this.mult(i));
-    this.score[i] += v;
-    if (r.isPlayer) this.game.ui.trickPop(`${label} +${v}`, this.combo[i]);
-  }
-
-  onTrick(r, name, n) {
-    this.add(r, (250 * n * (n + 1)) / 2, `${name}${n > 1 ? ' ×' + n : ''}`);
-  }
-
-  onDrift(r, big) {
-    this.add(r, big ? 250 : 100, big ? '漂移大喷射' : '漂移喷射');
-  }
-
-  onShortcut(r) {
-    this.add(r, 400, '抄近道');
-  }
-
-  onPad(r) {
-    this.add(r, 50, '加速带');
-  }
-
-  onKnock(victim) {
-    this.combo[victim.idx] = 0;
-    this.comboT[victim.idx] = -99;
-    this.air[victim.idx] = 0;
-  }
-
-  update(dt) {
-    for (const r of this.game.racers) {
-      if (r.out || r.finished) continue;
-      const i = r.idx;
-      if (!r.grounded && r.state === 'ski' && r.airT > 0.7) this.air[i] += dt * 120;
-      else if (r.grounded && this.air[i] > 0) {
-        if (r.state === 'ski' && this.air[i] >= 20) this.add(r, this.air[i], '滞空');
-        this.air[i] = 0;
-      }
-    }
+  onChainBank(r, total) {
+    this.score[r.idx] += total;
   }
 
   onFinish(r) {
@@ -234,16 +183,24 @@ class TrickMode extends BaseMode {
   }
 
   rankTag(r) {
-    return `${this.score[r.idx]}`;
+    return fmtPts(this.score[r.idx]);
+  }
+
+  resultCol(r) {
+    return `${this.score[r.idx].toLocaleString()} 分`;
   }
 
   hud() {
     const p = this.game.player;
     if (!p) return '';
-    const i = p.idx;
-    const live = this.game.raceTime - this.comboT[i] < COMBO_T && this.combo[i] > 1;
-    return `特技分 <b>${this.score[i]}</b>${live ? `<br><span style="color:#ffd23c">连击 ×${this.mult(i).toFixed(2)}</span>` : '<br><small>空翻 / 漂移 / 滞空 / 近道 / 加速带连着做有加成</small>'}`;
+    const me = this.score[p.idx];
+    const best = Math.max(...this.score);
+    return `特技分 <b>${me.toLocaleString()}</b>${best > me ? ` · 最高 ${best.toLocaleString()}` : ''}<br><small>技巧链结算才进账，摔了整条作废</small>`;
   }
+}
+
+function fmtPts(v) {
+  return v >= 10000 ? `${(v / 1000).toFixed(v >= 100000 ? 0 : 1)}k` : `${v}`;
 }
 
 // 计时赛：一个人滑，和幽灵（自己的最好成绩）比

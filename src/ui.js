@@ -1,9 +1,10 @@
 // DOM 界面：大厅菜单、HUD、结算、暂停
 import { THEMES, THEME_KEYS, LENGTHS, WEAPONS, WEAPON_KEYS, SKINS, SUIT_COLORS, HATS, POINTS, MODES, MODE_KEYS } from './config.js';
-import { GEAR, GEAR_KEYS, STAT_NAMES, STAT_KEYS, STAT_MAX, UPGRADES, UP_KEYS, UP_MAX, HAT_UNLOCK, COSMETIC_SLOTS, gearStats } from './gear.js';
+import { GEAR, GEAR_KEYS, RARITY, RARITY_KEYS, STAT_NAMES, STAT_KEYS, STAT_MAX, UPGRADES, UP_KEYS, UP_MAX, HAT_UNLOCK, COSMETIC_SLOTS, gearStats } from './gear.js';
 import { TRACKS, TRACK_MAP, CUPS, CHALLENGES, CHALLENGE_MAP, CUP_MAP, TROPHY, TROPHY_NAME, medalTimes } from './tracks.js';
 import { ACHIEVEMENTS, ACH_MAP, STAT_LABELS, CUP_LV } from './profile.js';
 import { TEAM_COLORS } from './modes.js';
+import { CHAIN_T, MULT_MAX } from './chain.js';
 import { fmtTime } from './util.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,6 +20,29 @@ const col = (side, title, small, body) =>
   `<section class="col ${side} panel"><h2 class="colTitle">${title}${small ? `<small>${small}</small>` : ''}</h2><div class="colBody">${body}</div></section>`;
 // 面板没占满屏幕时返回的“整屏”
 const FULL_FRAME = { cx: 0.5, cy: 0.5, w: 1, h: 1 };
+
+// 展厅页：角色站在中间的展台上，左边一列竖排子页签，右边信息面板。
+// label 是展台背后的全息大字；subs：[子页 key, 名字, 英文小字]，第一个是默认子页
+const SHOW = {
+  growth: { label: 'CAREER', subs: [['home', '总览', 'OVERVIEW'], ['ach', '成就', 'TROPHIES'], ['stats', '生涯', 'RECORDS']] },
+  garage: { label: 'GARAGE', subs: [['attr', '属性', 'PROPERTY'], ['up', '强化', 'UPGRADE']] },
+  look: { label: 'STYLE', subs: [['style', '造型', 'STYLE'], ['color', '配色', 'COLOR'], ['acc', '饰品', 'ACCESSORY']] },
+};
+
+// 装备的标签：最强和最弱的一项、深雪表现，都从属性表里算出来。返回 [[文字, 样式]]
+function gearTags(G) {
+  const R = RARITY[G.rarity] || RARITY.C;
+  const ks = STAT_KEYS.slice().sort((a, b) => G.stats[b] - G.stats[a]);
+  const hi = ks[0];
+  const lo = ks[ks.length - 1];
+  const tags = [[`${G.rarity} · ${R.name}`, 'r' + (G.rarity || 'C')]];
+  tags.push(G.stats[hi] === G.stats[lo] ? ['各项均衡', 'warm'] : [`${STAT_NAMES[hi]}突出`, 'warm']);
+  if (G.stats[hi] !== G.stats[lo]) tags.push([`${STAT_NAMES[lo]}偏弱`, '']);
+  const powder = G.powder ?? 1;
+  if (powder < 1) tags.push(['深雪减速少', 'pink']);
+  else if (powder > 1) tags.push(['深雪更慢', '']);
+  return tags;
+}
 
 // 存档 key（'gear:sled'、'hat:6'、'back:3'）对应的解锁条件
 function unlockOf(key) {
@@ -42,7 +66,12 @@ export class UI {
     this.lastItem = undefined;
     this.tab = 'race';
     this.pendingBuy = null; // 第一次点“购买”只是让按钮变成“确认购买”
+    this.sub = {}; // 展厅页各自停在哪个子页
+    for (const t in SHOW) this.sub[t] = SHOW[t].subs[0][0];
+    this.viewGear = null; // 车库里正在看的装备（null = 正在用的那件）
+    this.gearRank = null; // 车库底部按哪一档稀有度筛选（null = 跟着正在看的那件）
     for (const t of TABS) if (t !== 'keys') $('tab-' + t).addEventListener('click', (e) => this.onMenuClick(e));
+    for (const t in SHOW) this.bindDrag($('tab-' + t));
     this.buildMenu();
     $('tabs').addEventListener('click', (e) => {
       const b = e.target.closest('button');
@@ -144,13 +173,57 @@ export class UI {
 
   openTab(tab) {
     if (!TABS.includes(tab)) return;
-    if (tab !== this.tab) this.pendingBuy = null;
+    if (tab !== this.tab) {
+      this.pendingBuy = null;
+      this.viewGear = null;
+    }
     this.tab = tab;
     for (const x of $('tabs').children) x.classList.toggle('on', x.dataset.tab === tab);
     for (const t of TABS) $('tab-' + t).classList.toggle('hidden', t !== tab);
     if (tab !== 'keys') this.renderTab(tab);
-    // 赛事页每张卡片有自己的开始按钮
-    $('goWrap').classList.toggle('hidden', tab === 'events');
+    // 赛事页每张卡片有自己的开始按钮；展厅页中间要留给角色
+    $('goWrap').classList.toggle('hidden', tab === 'events' || !!SHOW[tab]);
+    $('menu').classList.toggle('show', !!SHOW[tab]);
+    this.applyShow();
+  }
+
+  // 告诉主程序背景该是缆车大厅还是展厅、展台上摆哪件装备
+  applyShow() {
+    const s = SHOW[this.tab];
+    this.game.setShow(s ? s.label : null, this.tab === 'garage' ? this.viewGear : null);
+  }
+
+  // 展厅中间的空地：按住左右拖动，转动台上的角色
+  bindDrag(el) {
+    let lastX = null;
+    el.addEventListener('pointerdown', (e) => {
+      if (!e.target.classList.contains('sdrag')) return;
+      lastX = e.clientX;
+      e.target.setPointerCapture(e.pointerId);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (lastX === null) return;
+      const room = this.game.showroom;
+      if (room) room.drag(e.clientX - lastX);
+      lastX = e.clientX;
+    });
+    const end = () => (lastX = null);
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
+
+  // 展厅页的骨架。head：{ badge, small, name, side, bar }；tags：[[文字, 样式]]；
+  // extra：摆在中间的东西（车库的装备栏）；act：右下角的大按钮
+  showHtml(tab, head, tags, body, extra = '', act = '') {
+    const cur = this.sub[tab];
+    const nav = SHOW[tab].subs.map(([k, name, en]) => `<button class="${k === cur ? 'on' : ''}" data-sub="${k}"><b>${name}</b><i>${en}</i></button>`).join('');
+    return `<div class="sdrag" title="按住左右拖动，可以转动角色"></div><nav class="snav">${nav}</nav>${extra}
+      <div class="sright"><section class="sinfo">
+        <header class="shead"><div class="sbadge">${head.badge}</div><div class="sname"><small>${head.small}</small><b>${head.name}</b></div>${head.side ? `<div class="sside">${head.side}</div>` : ''}</header>
+        ${head.bar || ''}
+        ${tags.length ? `<div class="stags">${tags.map(([t, c]) => `<span class="${c}">${esc(t)}</span>`).join('')}</div>` : ''}
+        <div class="sbody colBody">${body}</div>
+      </section>${act ? `<div class="sact">${act}</div>` : ''}</div>`;
   }
 
   renderTab(t) {
@@ -253,87 +326,156 @@ export class UI {
     const P = this.game.profile;
     const info = P.levelInfo();
     const titles = P.titles();
-    let html = `<div class="lvBox"><div class="lvBig">Lv.${info.lv}</div><div class="lvRest">
-      <div class="xpbar big"><i style="width:${info.need ? (info.cur / info.need) * 100 : 100}%"></i></div>
-      <div class="note" style="margin:4px 0 0">${info.need ? `经验 ${info.cur} / ${info.need}` : '已满级'} · ❄ 雪花币 ${P.coins}</div></div></div>`;
-    html += `<div class="field"><label>称号（达成部分成就后解锁，佩戴后显示在资料栏）</label><div class="opts">
-      <button class="${!P.data.title ? 'on' : ''}" data-act="title" data-v="">无</button>
-      ${titles.map((t) => `<button class="${P.data.title === t ? 'on' : ''}" data-act="title" data-v="${esc(t)}">${esc(t)}</button>`).join('')}
-      ${titles.length ? '' : '<span class="note">还没有称号</span>'}</div></div>`;
     const tasks = P.dailyTasks();
-    html += `<div class="secTitle">每日任务 <small>每个 +80 经验 ❄60，三个全做完再送 ❄150 · 每天零点刷新</small></div>`;
-    html += tasks
-      .map((t) => `<div class="task ${t.done ? 'done' : ''}"><span>${t.done ? '✅' : '⬜'} ${t.name}</span><div class="xpbar"><i style="width:${(t.prog / t.goal) * 100}%"></i></div><span class="tp">${t.prog} / ${t.goal}</span></div>`)
-      .join('');
-    html += '<div class="secTitle">生涯数据</div><div class="statGrid">';
-    html += STAT_LABELS.map(([k, label]) => `<div><span>${label}</span><b>${P.data.stats[k] ?? 0}</b></div>`).join('');
-    html += '</div>';
     const got = ACHIEVEMENTS.filter((a) => P.data.ach[a.id]).length;
-    const ach = ACHIEVEMENTS.map((a) => {
-      const done = !!P.data.ach[a.id];
-      return `<div class="ach ${done ? 'done' : ''}"><b>${done ? '🏆' : '🔒'} ${a.name}</b><small>${a.desc}</small><span>❄${a.coins}${a.title ? ` · 称号「${a.title}」` : ''}</span></div>`;
-    }).join('');
-    return col('l', '成长', '', html) + col('r', '成就', `${got} / ${ACHIEVEMENTS.length}`, `<div class="achGrid">${ach}</div>`);
+    const sub = this.sub.growth;
+    let body;
+    if (sub === 'ach') {
+      body = `<div class="ssec">成就<small>${got} / ${ACHIEVEMENTS.length}</small></div><div class="achGrid">`;
+      body += ACHIEVEMENTS.map((a) => {
+        const done = !!P.data.ach[a.id];
+        return `<div class="ach ${done ? 'done' : ''}"><b>${done ? '🏆' : '🔒'} ${a.name}</b><small>${a.desc}</small><span>❄${a.coins}${a.title ? ` · 称号「${a.title}」` : ''}</span></div>`;
+      }).join('');
+      body += '</div>';
+    } else if (sub === 'stats') {
+      body = '<div class="ssec">生涯数据</div><div class="statGrid">';
+      body += STAT_LABELS.map(([k, label]) => `<div><span>${label}</span><b>${(P.data.stats[k] ?? 0).toLocaleString()}</b></div>`).join('');
+      body += '</div>';
+    } else {
+      body = `<div class="ssec">称号<small>达成部分成就后解锁</small></div><div class="field"><div class="opts">
+        <button class="${!P.data.title ? 'on' : ''}" data-act="title" data-v="">无</button>
+        ${titles.map((t) => `<button class="${P.data.title === t ? 'on' : ''}" data-act="title" data-v="${esc(t)}">${esc(t)}</button>`).join('')}
+        ${titles.length ? '' : '<span class="note">还没有称号</span>'}</div></div>`;
+      body += '<div class="ssec">每日任务<small>每天零点刷新</small></div>';
+      body += tasks
+        .map((t) => `<div class="task ${t.done ? 'done' : ''}"><span>${t.done ? '✅' : '⬜'} ${t.name}</span><div class="xpbar"><i style="width:${(t.prog / t.goal) * 100}%"></i></div><span class="tp">${t.prog.toLocaleString()} / ${t.goal.toLocaleString()}</span></div>`)
+        .join('');
+      body += '<p class="note">每个任务 +80 经验 ❄60，三个全做完再送 ❄150。</p>';
+    }
+    const head = {
+      badge: `<small>Lv</small>${info.lv}`,
+      small: P.data.title ? `称号「${esc(P.data.title)}」` : '还没佩戴称号',
+      name: esc(this.game.playerName || '我的档案'),
+      side: `❄ ${P.coins.toLocaleString()}`,
+      bar: `<div class="sxp"><div class="xpbar"><i style="width:${info.need ? (info.cur / info.need) * 100 : 100}%"></i></div><span>${info.need ? `经验 ${info.cur} / ${info.need}` : '已满级'}</span></div>`,
+    };
+    const tags = [
+      [`成就 ${got} / ${ACHIEVEMENTS.length}`, 'warm'],
+      [`今日任务 ${tasks.filter((t) => t.done).length} / ${tasks.length}`, ''],
+      [`${P.data.stats.races} 场比赛`, ''],
+    ];
+    return this.showHtml('growth', head, tags, body);
   }
 
   garageHtml() {
     const g = this.game;
     const P = g.profile;
     const cur = g.look.gear;
-    let html = '';
-    for (const id of GEAR_KEYS) {
-      const G = GEAR[id];
-      const key = 'gear:' + id;
-      const st = P.unlockState(G.unlock, key);
-      const s = gearStats(id, P.up(id));
+    // 展台上摆的是正在看的那件，不一定是正在用的，也不一定已经拥有
+    const id = GEAR[this.viewGear] ? this.viewGear : cur;
+    const G = GEAR[id];
+    const key = 'gear:' + id;
+    const st = P.unlockState(G.unlock, key);
+    const owned = st === 'free' || st === 'owned';
+    const up = P.up(id);
+    const upSum = UP_KEYS.reduce((n, k) => n + up[k], 0);
+    const sub = this.sub.garage;
+    let body;
+    const rare = RARITY[G.rarity] || RARITY.C;
+    if (sub === 'up') {
+      const costNote = rare.up > 1 ? `，${rare.name}装备花费 ×${rare.up}` : '';
+      body = `<div class="ssec">强化<small>每条最多 ${UP_MAX} 级，只作用于这一件装备${costNote}</small></div>`;
+      for (const k of UP_KEYS) {
+        const U = UPGRADES[k];
+        const lv = up[k];
+        const cost = P.upgradeCost(id, k);
+        const pips = Array.from({ length: UP_MAX }, (_, i) => `<i class="${i < lv ? 'on' : ''}"></i>`).join('');
+        let btn;
+        if (!owned) btn = '<span class="tag lock">🔒 未拥有</span>';
+        else if (lv >= UP_MAX) btn = '<span class="tag on">已满级</span>';
+        else btn = `<button class="btn sm ${P.coins < cost ? 'poor' : ''}" data-act="up" data-line="${k}">强化 ❄${cost}</button>`;
+        body += `<div class="uprow"><div class="un"><b>${U.name}</b><small>${U.desc}</small></div><div class="pips">${pips}</div>${btn}</div>`;
+      }
+    } else {
+      const s = gearStats(id, up);
       const bars = STAT_KEYS.map((k) => {
         const b = (G.stats[k] / STAT_MAX) * 100;
         const e = ((s[k] - G.stats[k]) / STAT_MAX) * 100;
         return `<div class="stat"><span>${STAT_NAMES[k]}</span><div class="bar"><i style="width:${b}%"></i>${e > 0 ? `<em style="left:${b}%;width:${e}%"></em>` : ''}</div><b>${s[k].toFixed(1)}</b></div>`;
       }).join('');
-      let btn;
-      if (st === 'free' || st === 'owned') btn = id === cur ? '<span class="tag on">使用中</span>' : `<button class="btn sm" data-k="look.gear" data-v="${id}">选用</button>`;
-      else if (st === 'buy') btn = this.buyBtn(key, 'gear', id, '购买', G.unlock.cost, 'btn sm');
-      else btn = `<span class="tag lock">🔒 ${this.lockWhy(G.unlock)}</span>`;
-      html += `<div class="card gcard ${id === cur ? 'on' : ''}"><div class="cardHead"><span class="ic">${G.icon}</span><b>${G.name}</b><span class="tro"></span>${btn}</div><div class="cardSub">${G.desc}</div>${bars}</div>`;
+      body =
+        `<div class="ssec">装备特性</div><div class="strait r${G.rarity || 'C'}"><span class="ic">${G.icon}</span><p>${G.desc}</p></div>` +
+        `<div class="ssec">属性<small>会真实影响手感；绿色是强化加成</small></div><div class="gcard">${bars}</div>`;
     }
-    const G = GEAR[cur];
-    const up = P.up(cur);
-    let ups = '';
-    for (const k of UP_KEYS) {
-      const U = UPGRADES[k];
-      const lv = up[k];
-      const cost = P.upgradeCost(cur, k);
-      const pips = Array.from({ length: UP_MAX }, (_, i) => `<i class="${i < lv ? 'on' : ''}"></i>`).join('');
-      const btn = lv >= UP_MAX ? '<span class="tag on">已满级</span>' : `<button class="btn sm ${P.coins < cost ? 'poor' : ''}" data-act="up" data-line="${k}">强化 ❄${cost}</button>`;
-      ups += `<div class="uprow"><div class="un"><b>${U.name}</b><small>${U.desc}</small></div><div class="pips">${pips}</div>${btn}</div>`;
+    // 中间下方：先选稀有度，再换这一档里的装备
+    const rank = RARITY[this.gearRank] ? this.gearRank : G.rarity || 'C';
+    const chips = RARITY_KEYS.map((k) => `<button class="grank r${k} ${k === rank ? 'on' : ''}" data-act="rank" data-id="${k}"><b>${k}</b><i>${RARITY[k].name}</i></button>`).join('');
+    const pick = GEAR_KEYS.filter((k) => (GEAR[k].rarity || 'C') === rank)
+      .map((k) => {
+        const has = P.gearOwned(k);
+        const mark = k === cur ? '<em>使用中</em>' : has ? '' : '<em class="no">🔒</em>';
+        return `<button class="r${GEAR[k].rarity} ${k === id ? 'on' : ''} ${has ? '' : 'lock'}" data-act="view" data-id="${k}"><span class="rk">${GEAR[k].rarity}</span><span class="ic">${GEAR[k].icon}</span><b>${GEAR[k].name}</b>${mark}</button>`;
+      })
+      .join('');
+    // 右下角：左边在属性 / 强化之间切换，右边按状态是 选用 / 购买 / 未解锁
+    let act = sub === 'up' ? '<button class="sbtn" data-sub="attr"><b>属性</b><i>PROPERTY</i></button>' : '<button class="sbtn" data-sub="up"><b>强化</b><i>UPGRADE</i></button>';
+    let state;
+    if (owned) {
+      state = id === cur ? '使用中' : '已拥有';
+      act += id === cur ? '<button class="sbtn main off" disabled><b>使用中</b><i>EQUIPPED</i></button>' : `<button class="sbtn main" data-k="look.gear" data-v="${id}"><b>选用</b><i>EQUIP</i></button>`;
+    } else if (st === 'buy') {
+      const cost = G.unlock.cost;
+      const confirm = this.pendingBuy === key;
+      state = '可购买';
+      act += `<button class="sbtn main ${confirm ? 'confirm' : ''} ${P.coins < cost ? 'poor' : ''}" data-act="buy" data-key="${key}" data-field="gear" data-v="${id}"><b>${confirm ? '确认购买' : '购买'}</b><i>❄ ${cost}</i></button>`;
+    } else {
+      const why = this.lockWhy(G.unlock);
+      state = '未解锁';
+      act += `<button class="sbtn main off" data-act="locked" data-why="${esc(why)}"><b>未解锁</b><i>${G.unlock.lv ? `Lv.${G.unlock.lv}` : 'LOCKED'}</i></button>`;
     }
-    return (
-      col('l', '滑行装备', '属性会真实影响手感；强化只作用于对应的装备', html) +
-      col('r', `强化：${G.icon} ${G.name}`, `每条最多 ${UP_MAX} 级`, ups)
-    );
+    const head = { badge: G.icon, small: `${G.rarity} · ${rare.name} · ${state}`, name: G.name, side: `强化 <b>${upSum}</b> / ${UP_KEYS.length * UP_MAX}` };
+    return this.showHtml('garage', head, gearTags(G), body, `<div class="spick"><div class="granks">${chips}</div><div class="glist">${pick}</div></div>`, act);
   }
 
   lookHtml() {
     const g = this.game;
     const L = g.look;
     const sw = (list) => list.map((c) => [c, '', `background:${hex(c)}`]);
-    let html = this.lockRow('发型 / 帽子', 'hat', HATS.map((h, i) => ({ name: h, unlock: HAT_UNLOCK[i] })), L.hat | 0, (i) => 'hat:' + i);
-    html +=
-      this.optRow('帽子 / 头发颜色', 'look.hatColor', sw([...SUIT_COLORS, 0x2a1a12, 0x7ad21f]), L.hatColor, 'sw') +
-      this.optRow('肤色', 'look.skin', sw(SKINS), L.skin, 'sw') +
-      this.optRow('上衣', 'look.jacket', sw(SUIT_COLORS), L.jacket, 'sw') +
-      this.optRow('条纹 / 袖口', 'look.stripe', sw(SUIT_COLORS), L.stripe, 'sw') +
-      this.optRow('裤子', 'look.pants', sw(SUIT_COLORS), L.pants, 'sw') +
-      this.optRow('板子 / 雪橇颜色', 'look.ski', sw(SUIT_COLORS), L.ski, 'sw') +
-      this.optRow('胡子', 'look.mustache', [[false, '无'], [true, '有']], L.mustache);
-    let acc = '';
-    for (const slot in COSMETIC_SLOTS) {
-      const S = COSMETIC_SLOTS[slot];
-      acc += this.lockRow(S.name, slot, S.list, L[slot] | 0, (i) => `${slot}:${i}`);
+    const lockNote = '<p class="note">🔒 的部件升级或达成成就后解锁；标着 ❄ 的用雪花币购买（点两下确认）。</p>';
+    const sub = this.sub.look;
+    let body;
+    if (sub === 'color') {
+      body =
+        '<div class="ssec">配色</div>' +
+        this.optRow('帽子 / 头发', 'look.hatColor', sw([...SUIT_COLORS, 0x2a1a12, 0x7ad21f]), L.hatColor, 'sw') +
+        this.optRow('上衣', 'look.jacket', sw(SUIT_COLORS), L.jacket, 'sw') +
+        this.optRow('条纹 / 袖口', 'look.stripe', sw(SUIT_COLORS), L.stripe, 'sw') +
+        this.optRow('裤子', 'look.pants', sw(SUIT_COLORS), L.pants, 'sw') +
+        this.optRow('板子 / 雪橇', 'look.ski', sw(SUIT_COLORS), L.ski, 'sw');
+    } else if (sub === 'acc') {
+      body = '<div class="ssec">饰品</div>';
+      for (const slot in COSMETIC_SLOTS) {
+        const S = COSMETIC_SLOTS[slot];
+        body += this.lockRow(S.name, slot, S.list, L[slot] | 0, (i) => `${slot}:${i}`);
+      }
+      body += lockNote;
+    } else {
+      body =
+        '<div class="ssec">造型</div>' +
+        this.lockRow('发型 / 帽子', 'hat', HATS.map((h, i) => ({ name: h, unlock: HAT_UNLOCK[i] })), L.hat | 0, (i) => 'hat:' + i) +
+        this.optRow('肤色', 'look.skin', sw(SKINS), L.skin, 'sw') +
+        this.optRow('胡子', 'look.mustache', [[false, '无'], [true, '有']], L.mustache) +
+        lockNote;
     }
-    acc += '<p class="note">🔒 的部件升级或达成成就后解锁；标着 ❄ 的用雪花币购买（点两下确认）。滑行装备在「车库」里换。</p>';
-    return col('l', '造型与配色', '', html) + col('r', '饰品', '', acc);
+    // 标签：现在身上穿戴的东西
+    const tags = [[HATS[L.hat | 0], 'warm']];
+    for (const slot in COSMETIC_SLOTS) {
+      const it = COSMETIC_SLOTS[slot].list[L[slot] | 0];
+      if ((L[slot] | 0) > 0 && it) tags.push(slot === 'trail' ? [`${it.name}滑痕`, 'pink'] : [it.name, '']);
+    }
+    const G = GEAR[L.gear] || GEAR.ski;
+    const head = { badge: '🎨', small: '角色造型', name: esc(g.playerName || '我的角色'), side: `${G.icon} ${G.name}` };
+    return this.showHtml('look', head, tags, body);
   }
 
   rulesHtml() {
@@ -361,6 +503,33 @@ export class UI {
     }
     if (act === 'locked') {
       this.toast(b.dataset.why || '还没解锁', true);
+      return;
+    }
+    // 展厅页左边的子页签（车库右下角的 属性 / 强化 按钮也走这里）
+    if (b.dataset.sub) {
+      this.pendingBuy = null;
+      this.sub[this.tab] = b.dataset.sub;
+      for (const x of $('tab-' + this.tab).querySelectorAll('.colBody')) x.scrollTop = 0;
+      this.renderTab(this.tab);
+      return;
+    }
+    // 车库：换一档稀有度，展台跟着换成这一档的第一件
+    if (act === 'rank') {
+      this.pendingBuy = null;
+      this.gearRank = b.dataset.id;
+      const first = GEAR_KEYS.find((k) => (GEAR[k].rarity || 'C') === this.gearRank);
+      if (first) this.viewGear = first;
+      this.renderTab('garage');
+      this.applyShow();
+      return;
+    }
+    // 车库：换一件装备摆上展台看看
+    if (act === 'view') {
+      this.pendingBuy = null;
+      this.viewGear = b.dataset.id;
+      this.gearRank = (GEAR[b.dataset.id] && GEAR[b.dataset.id].rarity) || 'C';
+      this.renderTab('garage');
+      this.applyShow();
       return;
     }
     if (act === 'buy') {
@@ -399,14 +568,16 @@ export class UI {
     }
     if (act === 'up') {
       const line = b.dataset.line;
-      const cost = P.upgradeCost(g.look.gear, line);
+      // 强化的是展台上正在看的那件装备
+      const gear = GEAR[this.viewGear] ? this.viewGear : g.look.gear;
+      const cost = P.upgradeCost(gear, line);
       if (P.coins < cost) {
         this.toast(`雪花币不够（需要 ❄${cost}，你有 ❄${P.coins}）`, true);
         return;
       }
-      if (P.upgrade(g.look.gear, line)) {
+      if (P.upgrade(gear, line)) {
         const ach = P.checkAch();
-        this.toast(`${UPGRADES[line].name} 升到 ${P.up(g.look.gear)[line]} 级！${ach.length ? ` 🏆 达成成就「${ach.map((a) => a.name).join('」「')}」` : ''}`);
+        this.toast(`${UPGRADES[line].name} 升到 ${P.up(gear)[line]} 级！${ach.length ? ` 🏆 达成成就「${ach.map((a) => a.name).join('」「')}」` : ''}`);
         this.refreshProfile();
         this.renderTab('garage');
       }
@@ -465,6 +636,30 @@ export class UI {
       r = m.right;
       t = m.top;
       b = $('goWrap').classList.contains('hidden') ? m.bottom : $('goWrap').getBoundingClientRect().top;
+      if (SHOW[this.tab]) {
+        // 展厅页：空地在竖排页签和右侧面板之间、装备栏之上；窄窗口下是页面里专门留出的那一块
+        const el = $('tab-' + this.tab);
+        const q = (s) => {
+          const x = el.querySelector(s);
+          return x && x.getBoundingClientRect();
+        };
+        if (W <= 900) {
+          const d = q('.sdrag');
+          if (d) {
+            l = d.left;
+            r = d.right;
+            t = Math.max(0, d.top);
+            b = Math.min(H, d.bottom);
+          }
+        } else {
+          const nav = q('.snav');
+          const right = q('.sright');
+          const pick = q('.spick');
+          if (nav) l = nav.right;
+          if (right) r = right.left;
+          if (pick) b = pick.top;
+        }
+      }
     }
     // 窄窗口下面板铺满了屏幕，没有空地可言，就按整屏居中
     if (r - l < 220 || b - t < 160) return FULL_FRAME;
@@ -532,6 +727,8 @@ export class UI {
     this.rankT = 0;
     this.popT = 0;
     $('trickPop').classList.remove('show');
+    this.chainOn = false;
+    $('chain').classList.add('hidden');
     this.lastModeHtml = null;
     $('modeBox').classList.add('hidden');
     this.hideImpact();
@@ -590,14 +787,68 @@ export class UI {
     this.tipT = dur;
   }
 
-  // 特技赛得分弹字
-  trickPop(text, combo) {
+  // 技巧链结算 / 中断弹字。kind：good / gold / bad
+  chainPop(title, value, kind = 'good') {
     const el = $('trickPop');
-    el.innerHTML = `<div>${esc(text)}</div>${combo > 1 ? `<small>连击 ×${combo}</small>` : ''}`;
-    el.classList.remove('show');
+    el.innerHTML = `<div class="t">${esc(title)}</div><div class="v">${esc(value)}</div>`;
+    el.className = 'stroke ' + kind;
     void el.offsetWidth;
     el.classList.add('show');
-    this.popT = 1.3;
+    this.popT = 1.5;
+  }
+
+  // 技巧链面板：内容变了才重画，倒计时条每帧走
+  updateChain(p) {
+    const ch = p.chain;
+    // 空中正在做的动作（还没落地，不算分）
+    let air = '';
+    if (!p.grounded && p.state === 'ski') {
+      const deg = (a) => Math.round(Math.abs(a) * 18 / Math.PI) * 10;
+      const parts = [];
+      if (Math.abs(p.flip) > 0.3) parts.push(`${p.flip > 0 ? '后空翻' : '前空翻'} ${deg(p.flip)}°`);
+      if (Math.abs(p.spinA) > 0.3) parts.push(`转体 ${deg(p.spinA)}°`);
+      if (p.grabT > 0.05) parts.push(`抓板 ${p.grabT.toFixed(1)}s`);
+      air = parts.join(' · ');
+    }
+    const on = !!ch && (ch.active || !!air) && !p.out && !p.finished && this.game.state === 'race';
+    if (on !== this.chainOn) {
+      this.chainOn = on;
+      $('chain').classList.toggle('hidden', !on);
+      this.chainSeq = -1;
+      this.chainMult = 0;
+    }
+    if (!on) return;
+    const el = $('chain');
+    if (ch.seq !== this.chainSeq || air !== this.chainAir) {
+      this.chainSeq = ch.seq;
+      this.chainAir = air;
+      const m = ch.mult;
+      const cm = el.querySelector('.cm');
+      cm.textContent = `×${m}`;
+      cm.className = 'cm' + (m >= MULT_MAX ? ' max' : m >= 5 ? ' hot' : '');
+      if (m !== this.chainMult) {
+        this.chainMult = m;
+        void cm.offsetWidth;
+        cm.classList.add('bump');
+      }
+      el.querySelector('.cp').textContent = ch.pts.toLocaleString();
+      const items = ch.list.map((e) => `${esc(e.label)} <i>+${e.pts}</i>`);
+      if (ch.live > 0) items.push(`<span class="lv">漂移中 +${ch.live}</span>`);
+      const shown = items.slice(air ? -2 : -3);
+      if (air) shown.push(`<span class="lv">${air}</span>`);
+      el.querySelector('.cl').innerHTML = shown.join(' · ');
+    }
+    const hold = (!p.grounded && p.state === 'ski') || p.drifting;
+    const k = !ch.n || hold ? 1 : Math.max(0, ch.t / CHAIN_T);
+    const w = Math.round(k * 100);
+    const cls = 'cb' + (hold || !ch.n ? ' hold' : ch.t < 1 ? ' low' : '');
+    if (w !== this.chainW || cls !== this.chainCls) {
+      this.chainW = w;
+      this.chainCls = cls;
+      const cb = el.querySelector('.cb');
+      cb.className = cls;
+      cb.firstChild.style.width = w + '%';
+    }
   }
 
   feed(html) {
@@ -637,6 +888,7 @@ export class UI {
     const p = g.player;
     this.setFrost(!!p && p.frozenT > 0);
     if (!p) return;
+    this.updateChain(p);
     $('posNum').textContent = p.out ? '💀' : p.rank;
     $('timer').textContent = fmtTime(p.finished ? p.finishTime : g.raceTime);
     $('speedNum').textContent = p.out ? 0 : Math.round(p.vel.length() * 3.6);

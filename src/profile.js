@@ -1,7 +1,7 @@
 // 玩家存档与成长：等级经验、雪花币、解锁购买、装备强化、每日任务、成就、生涯数据、结算奖励。
 // 全部存在浏览器本地（localStorage）。
 import { HATS, MODE_KEYS, MODES } from './config.js';
-import { GEAR, GEAR_KEYS, UP_KEYS, UP_MAX, UP_COST, HAT_UNLOCK, COSMETIC_SLOTS } from './gear.js';
+import { GEAR, GEAR_KEYS, RARITY, UP_KEYS, UP_MAX, UP_COST, HAT_UNLOCK, COSMETIC_SLOTS } from './gear.js';
 import { CUPS, CHALLENGES } from './tracks.js';
 import { mulberry32 } from './util.js';
 
@@ -28,6 +28,10 @@ export const TASKS = [
   { id: 'modes2', name: '玩 2 种不同的模式', goal: 2, key: 'modes' },
   { id: 'pad6', name: '冲过 6 条加速带', goal: 6, key: 'pads' },
   { id: 'cup1', name: '完成 1 场杯赛比赛', goal: 1, key: 'cupRaces' },
+  { id: 'chain4', name: '结算 1 条 ×4 以上的技巧链', goal: 1, key: 'chain4' },
+  { id: 'skill20k', name: '累计拿到 20000 技巧分', goal: 20000, key: 'skill' },
+  { id: 'spin5', name: '完成 5 次转体', goal: 5, key: 'spins' },
+  { id: 'grab5', name: '完成 5 次抓板', goal: 5, key: 'grabs' },
 ];
 const TASK_MAP = Object.fromEntries(TASKS.map((t) => [t.id, t]));
 
@@ -44,6 +48,12 @@ export const ACHIEVEMENTS = [
   { id: 'hit500', name: '战争机器', desc: '累计击飞对手 500 次', test: (s) => s.hits >= 500, coins: 1200, title: '战争机器' },
   { id: 'flip3', name: '三周跳', desc: '单次腾空完成 3 圈空翻', test: (s) => s.maxFlip >= 3, coins: 300, title: '空翻大师' },
   { id: 'flip200', name: '翻滚吧', desc: '累计完成 200 次空翻', test: (s) => s.flips >= 200, coins: 500 },
+  { id: 'spin3', name: '陀螺', desc: '单次腾空完成 1080 度转体', test: (s) => s.maxSpin >= 3, coins: 300 },
+  { id: 'grab2', name: '抓得稳', desc: '一次抓板 2 秒以上并稳稳落地', test: (s) => s.maxGrab >= 2, coins: 200 },
+  { id: 'chain5', name: '连招入门', desc: '结算一条 ×5 的技巧链', test: (s) => s.bestMult >= 5, coins: 150 },
+  { id: 'chain10', name: '技巧链大师', desc: '结算一条 ×10 满倍率的技巧链', test: (s) => s.bestMult >= 10, coins: 600, title: '连招大师' },
+  { id: 'chain30k', name: '一气呵成', desc: '单条技巧链结算 30000 分', test: (s) => s.bestChain >= 30000, coins: 500, title: '一气呵成' },
+  { id: 'skill1m', name: '花式百万', desc: '累计拿到 1,000,000 技巧分', test: (s) => s.skill >= 1e6, coins: 1000 },
   { id: 'speed180', name: '风驰电掣', desc: '贴地滑行时速达到 180 km/h', test: (s) => s.maxSpeed >= 180, coins: 200 },
   { id: 'speed230', name: '音障边缘', desc: '贴地滑行时速达到 230 km/h', test: (s) => s.maxSpeed >= 230, coins: 500, title: '速度狂人' },
   { id: 'air3', name: '滞空王', desc: '单次腾空超过 3 秒', test: (s) => s.maxAir >= 3, coins: 300 },
@@ -51,7 +61,9 @@ export const ACHIEVEMENTS = [
   { id: 'clean', name: '不沾雪', desc: '一场比赛不被击飞并拿到第一（至少 4 人）', test: (s) => s.cleanWins >= 1, coins: 500, title: '不沾雪' },
   { id: 'lv10', name: '小有名气', desc: '达到 10 级', test: (s, p) => p.level >= 10, coins: 500 },
   { id: 'lv20', name: '雪坛名宿', desc: '达到 20 级', test: (s, p) => p.level >= 20, coins: 1000, title: '雪坛名宿' },
-  { id: 'gearAll', name: '装备收藏家', desc: '拥有全部 4 种滑行装备', test: (s, p) => GEAR_KEYS.every((k) => p.gearOwned(k)), coins: 600 },
+  { id: 'gearAll', name: '装备收藏家', desc: '拥有双板、单板、雪橇和充气圈', test: (s, p) => ['ski', 'board', 'sled', 'tube'].every((k) => p.gearOwned(k)), coins: 600 },
+  { id: 'gearS', name: '传说入手', desc: '拥有一件 S 级滑行装备', test: (s, p) => GEAR_KEYS.some((k) => GEAR[k].rarity === 'S' && p.gearOwned(k)), coins: 800, title: '传说收藏' },
+  { id: 'gearFull', name: '车库满员', desc: '拥有全部滑行装备', test: (s, p) => GEAR_KEYS.every((k) => p.gearOwned(k)), coins: 2500, title: '车库满员' },
   { id: 'upMax', name: '改装狂人', desc: '把一件装备的三条强化全部升满', test: (s, p) => GEAR_KEYS.some((k) => UP_KEYS.every((u) => p.up(k)[u] >= UP_MAX)), coins: 600 },
   { id: 'gold1', name: '金杯得主', desc: '第一次拿到杯赛金杯', test: (s, p) => Object.values(p.data.cups).some((t) => t >= 3), coins: 500, title: '金杯得主' },
   { id: 'cupAll', name: '大满贯', desc: '四个杯赛全部拿到金杯', test: (s, p) => CUPS.every((c) => (p.data.cups[c.id] || 0) >= 3), coins: 2000, title: '大满贯' },
@@ -60,7 +72,7 @@ export const ACHIEVEMENTS = [
   { id: 'modesAll', name: '全能选手', desc: '每种模式都玩过一次', test: (s, p) => MODE_KEYS.every((k) => p.data.modes[k]), coins: 400 },
   { id: 'teamWin', name: '团队之光', desc: '赢得一场团队赛', test: (s) => s.teamWins >= 1, coins: 200 },
   { id: 'elimWin', name: '最后的幸存者', desc: '赢得一场淘汰赛', test: (s) => s.elimWins >= 1, coins: 200 },
-  { id: 'trick', name: '特技之星', desc: '特技赛单局拿到 10000 分', test: (s) => s.bestTrick >= 10000, coins: 400, title: '特技之星' },
+  { id: 'trick', name: '特技之星', desc: '特技赛单局拿到 30000 分', test: (s) => s.bestTrick >= 30000, coins: 400, title: '特技之星' },
   { id: 'brawl', name: '乱斗之王', desc: '大乱斗单局击飞对手 8 次', test: (s) => s.bestBrawl >= 8, coins: 400, title: '乱斗之王' },
   { id: 'ttGold', name: '计时金牌', desc: '计时赛拿到一块金牌', test: (s) => s.ttGold >= 1, coins: 300 },
 ];
@@ -68,7 +80,8 @@ export const ACH_MAP = Object.fromEntries(ACHIEVEMENTS.map((a) => [a.id, a]));
 
 export const STAT_LABELS = [
   ['races', '比赛场数'], ['wins', '冠军'], ['podiums', '前三名'], ['hits', '击飞对手'], ['knocked', '被击飞'],
-  ['flips', '空翻'], ['maxFlip', '单次最多空翻（圈）'], ['driftBoosts', '漂移喷射'], ['shortcuts', '抄近道'], ['pads', '加速带'],
+  ['flips', '空翻'], ['maxFlip', '单次最多空翻（圈）'], ['spins', '转体'], ['grabs', '抓板'], ['driftBoosts', '漂移喷射'], ['shortcuts', '抄近道'], ['pads', '加速带'],
+  ['skill', '累计技巧分'], ['bestChain', '最高单条技巧链'], ['bestMult', '最高技巧链倍率'],
   ['maxSpeed', '最高时速（km/h）'], ['maxAir', '最长滞空（秒）'], ['coinsEarned', '累计获得雪花币'], ['playTime', '比赛总时长（分钟）'],
 ];
 
@@ -83,6 +96,7 @@ const defaults = () => ({
     races: 0, wins: 0, podiums: 0, hits: 0, knocked: 0, flips: 0, driftBoosts: 0, shortcuts: 0, pads: 0,
     maxFlip: 0, maxSpeed: 0, maxAir: 0, cleanWins: 0, teamWins: 0, elimWins: 0, bestTrick: 0, bestBrawl: 0,
     ttGold: 0, cupRaces: 0, coinsEarned: 0, playTime: 0,
+    spins: 0, maxSpin: 0, grabs: 0, maxGrab: 0, skill: 0, bestChain: 0, bestMult: 0,
   },
   modes: {}, // 玩过的模式
   best: {}, // 计时赛最好成绩：{ 赛道 key: 秒 }
@@ -194,7 +208,9 @@ export class Profile {
 
   upgradeCost(gear, line) {
     const lv = this.up(gear)[line];
-    return lv >= UP_MAX ? 0 : UP_COST[lv];
+    if (lv >= UP_MAX) return 0;
+    const mul = (RARITY[(GEAR[gear] || GEAR.ski).rarity] || RARITY.C).up;
+    return Math.round(UP_COST[lv] * mul);
   }
 
   upgrade(gear, line) {
@@ -275,7 +291,7 @@ export class Profile {
   unlocksBetween(from, to) {
     const out = [];
     const hit = (u) => u && u.lv && u.lv > from && u.lv <= to;
-    for (const k of GEAR_KEYS) if (hit(GEAR[k].unlock)) out.push(`${GEAR[k].icon} ${GEAR[k].name}${GEAR[k].unlock.cost ? '（可购买）' : ''}`);
+    for (const k of GEAR_KEYS) if (hit(GEAR[k].unlock)) out.push(`${GEAR[k].icon} ${GEAR[k].name}（${GEAR[k].rarity}）${GEAR[k].unlock.cost ? '（可购买）' : ''}`);
     HAT_UNLOCK.forEach((u, i) => hit(u) && out.push(`发型「${HATS[i]}」${u.cost ? '（可购买）' : ''}`));
     for (const slot in COSMETIC_SLOTS) {
       COSMETIC_SLOTS[slot].list.forEach((it, i) => hit(it.unlock) && out.push(`${COSMETIC_SLOTS[slot].name}「${it.name}」${it.unlock.cost ? '（可购买）' : ''}`));
@@ -306,6 +322,7 @@ export class Profile {
     };
     if (rep.hits) add(`击飞对手 ×${rep.hits}`, Math.min(rep.hits, 20) * 12, Math.min(rep.hits, 20) * 4);
     if (rep.flips) add(`空翻 ×${rep.flips}`, Math.min(rep.flips, 30) * 4, 0);
+    if (rep.skill) add(`技巧分 ${rep.skill.toLocaleString()}（最高 ×${rep.bestMult}）`, Math.min(100, Math.round(rep.skill / 300)), Math.min(30, Math.round(rep.skill / 1000)));
     if (rep.driftBoosts) add(`漂移喷射 ×${rep.driftBoosts}`, Math.min(rep.driftBoosts, 30) * 2, 0);
     if (rep.shortcuts) add(`抄近道 ×${rep.shortcuts}`, rep.shortcuts * 15, rep.shortcuts * 5);
     if (rep.mode === 'team' && rep.teamWin) add('团队获胜', 60, 40);
@@ -338,10 +355,18 @@ export class Profile {
       shortcuts: rep.shortcuts,
       pads: rep.pads,
       cupRaces: rep.kind === 'cup' ? 1 : 0,
+      spins: rep.spins | 0,
+      grabs: rep.grabs | 0,
+      skill: rep.skill | 0,
     };
     for (const k in delta) s[k] += delta[k];
+    const taskDelta = { ...delta, chain4: rep.bestMult >= 4 ? 1 : 0 };
     s.knocked += rep.knocked;
     s.maxFlip = Math.max(s.maxFlip, rep.maxFlip);
+    s.maxSpin = Math.max(s.maxSpin, rep.maxSpin | 0);
+    s.maxGrab = Math.max(s.maxGrab, Math.round((rep.maxGrab || 0) * 10) / 10);
+    s.bestChain = Math.max(s.bestChain, rep.bestChain | 0);
+    s.bestMult = Math.max(s.bestMult, rep.bestMult | 0);
     s.maxSpeed = Math.max(s.maxSpeed, rep.maxSpeed);
     s.maxAir = Math.max(s.maxAir, Math.round(rep.maxAir * 10) / 10);
     s.playTime = Math.round((s.playTime + rep.time / 60) * 10) / 10;
@@ -364,7 +389,7 @@ export class Profile {
     for (const t of daily.tasks) {
       if (t.done) continue;
       const def = TASK_MAP[t.id];
-      t.prog = def.key === 'modes' ? Object.keys(daily.modes).length : t.prog + (delta[def.key] || 0);
+      t.prog = def.key === 'modes' ? Object.keys(daily.modes).length : t.prog + (taskDelta[def.key] || 0);
       if (t.prog >= def.goal) {
         t.prog = def.goal;
         t.done = true;

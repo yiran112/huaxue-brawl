@@ -182,9 +182,9 @@ export class Racer {
     this.driftOutT = 0.4; // 收尾：这段时间里残余的横滑继续转成前进速度
     this.chain.setLive(0);
     if (!score) return;
-    const lv = c >= DRIFT_L2 ? 2 : c >= DRIFT_L1 && boost ? 1 : 0;
-    if (pts >= 40) this.chain.add(lv === 2 && boost ? '漂移大喷射' : lv ? '漂移喷射' : '漂移', pts + (lv === 2 && boost ? 250 : lv ? 100 : 0));
-    if (!boost || c < DRIFT_L1) return;
+    const lv = !boost ? 0 : c >= DRIFT_L2 ? 2 : c >= DRIFT_L1 ? 1 : 0;
+    if (pts >= 40) this.chain.add(['漂移', '漂移喷射', '漂移大喷射'][lv], pts + [0, 100, 250][lv]);
+    if (!lv) return;
     const big = c >= DRIFT_L2;
     this.turboT = Math.max(this.turboT, big ? 1.0 : 0.5);
     this.game.onDriftBoost(this, big);
@@ -195,28 +195,65 @@ export class Racer {
     return this.team >= 0 && !!o && o !== this && o.team === this.team;
   }
 
-  // 翻着跟头落地：转够整圈就加速，没转正就摔
-  landTrick() {
+  // 落地结算这次腾空：空翻 / 转体转够整圈就加速，没转正就摔；抓板要在落地前松手；滞空久了也算一招
+  landAir(airT) {
+    const tol = this.mods.flipTol;
     const turns = this.flip / TAU;
     const n = Math.round(turns);
-    const err = Math.abs(turns - n) * TAU;
+    const ferr = Math.abs(turns - n) * TAU;
     const back = this.flip > 0;
+    const sTurns = this.spinA / TAU;
+    const sn = Math.round(sTurns);
+    const serr = Math.abs(sTurns - sn) * TAU;
     // 落地时头是不是朝下
     const headDown = Math.cos(this.flip) < -0.2;
-    this.flip = 0;
-    if (err > FLIP_TOL * this.mods.flipTol) {
+    const grab = this.grabT;
+    const sloppy = this.grabbing;
+    this.clearAir();
+    if (ferr > FLIP_TOL * tol || serr > SPIN_TOL * tol) {
       _v.set(0, 4, 0);
-      if (!this.knock(_v, 1.2, null, '空翻没转完')) this.vel.multiplyScalar(0.6);
+      if (!this.knock(_v, 1.2, null, ferr > FLIP_TOL * tol ? '空翻没转完' : '转体没转完')) this.vel.multiplyScalar(0.6);
       else if (headDown) this.plant();
       return;
     }
-    if (n === 0) return;
-    const k = Math.min(3, Math.abs(n));
-    this.turboT = Math.max(this.turboT, 0.5 + 0.55 * k);
-    this.vel.x += -Math.sin(this.yaw) * (2 + 2.5 * k);
-    this.vel.z += -Math.cos(this.yaw) * (2 + 2.5 * k);
-    this.tricks += k;
-    this.game.onTrick(this, back ? '后空翻' : '前空翻', Math.abs(n));
+    const chain = this.chain;
+    const parts = [];
+    let grabOk = 0;
+    if (sloppy) {
+      // 抓着板落地：站不稳，掉速，这次抓板不算
+      this.vel.x *= 0.75;
+      this.vel.z *= 0.75;
+      this.game.onSloppy?.(this);
+    } else if (grab >= GRAB_MIN) {
+      const label = `抓板 ${grab.toFixed(1)}s`;
+      chain.add(label, 60 + grab * 160);
+      parts.push(label);
+      grabOk = grab;
+    }
+    if (n !== 0) {
+      const k = Math.min(3, Math.abs(n));
+      this.turboT = Math.max(this.turboT, 0.5 + 0.55 * k);
+      this.vel.x += -Math.sin(this.yaw) * (2 + 2.5 * k);
+      this.vel.z += -Math.cos(this.yaw) * (2 + 2.5 * k);
+      this.tricks += k;
+      const an = Math.abs(n);
+      const label = `${back ? '后空翻' : '前空翻'}${an > 1 ? ' ×' + an : ''}`;
+      chain.add(label, (250 * an * (an + 1)) / 2);
+      parts.push(label);
+      this.game.onTrick(this, back ? '后空翻' : '前空翻', an, 'flip');
+    }
+    if (sn !== 0) {
+      const an = Math.abs(sn);
+      const k = Math.min(3, an);
+      this.turboT = Math.max(this.turboT, 0.3 + 0.35 * k);
+      this.tricks += k;
+      const label = `转体 ${an * 360}`;
+      chain.add(label, (200 * an * (an + 1)) / 2);
+      parts.push(label);
+      this.game.onTrick(this, '转体', an, 'spin');
+    }
+    if (airT > 1.2) chain.add(`滞空 ${airT.toFixed(1)}s`, (airT - 0.8) * 150);
+    if (parts.length) this.game.onLanded?.(this, parts, grabOk);
   }
 
   // 预估还要多久落地（机器人决定翻不翻跟头用）
@@ -278,9 +315,11 @@ export class Racer {
     this.boostT = 0;
     this.turboT = 0;
     this.hookT = 0;
-    this.flip = 0;
+    this.clearAir();
     this.drifting = false;
     this.driftCharge = 0;
+    this.driftPts = 0;
+    this.chain.break(cause);
     if (impulse) this.vel.add(impulse);
     this.grounded = false;
     this.pos.y += 0.25;
@@ -306,6 +345,8 @@ export class Racer {
     this.turboT = 0;
     this.drifting = false;
     this.driftCharge = 0;
+    this.driftPts = 0;
+    this.chain.break('冰冻枪');
     this.game.onKnock(this, source, '冰冻枪', true);
     return true;
   }
@@ -393,10 +434,10 @@ export class Racer {
     // 漂移：按住漂移键 + 方向进入；松开时按蓄力给小喷射
     if (this.drifting) {
       if (!controllable || !inp.drift || this.finished || this.speed < 7 || (!this.grounded && this.airT > 0.35)) {
-        this.endDrift(controllable && !this.finished && this.grounded);
+        this.endDrift(controllable && !this.finished, this.grounded);
       } else if (steer * this.driftDir < -0.6) {
         // 一直按着漂移键反打方向：结算这一段，直接换边接着漂
-        this.endDrift(this.grounded);
+        this.endDrift(true, this.grounded);
         this.drifting = true;
         this.driftDir = Math.sign(steer);
       }
@@ -404,10 +445,13 @@ export class Racer {
       this.drifting = true;
       this.driftDir = Math.sign(steer);
       this.driftCharge = 0;
+      this.driftPts = 0;
     }
+    // 空中转体：方向键这时候用来转身子，不再拐弯
+    const spinning = controllable && !this.grounded && !this.finished && inp.spin !== 0;
 
     // 转向
-    if (controllable) {
+    if (controllable && !spinning) {
       let turn = (this.grounded ? 2.25 * mods.turn * (this.surf === 1 ? 0.8 : 1) : 0.8) / (1 + this.speed / 75);
       let st = steer;
       if (this.drifting && this.grounded) {
@@ -448,7 +492,11 @@ export class Racer {
         if ((drifting || this.driftOutT > 0) && vF > 0) {
           // 漂移：横滑磨掉的速度大部分转回前进方向，所以急转也不怎么掉速
           vF += (Math.sqrt(Math.max(0, sp2 - _lat.lengthSq())) - vF) * 0.92;
-          if (drifting) this.driftCharge += dt * clamp(this.slip / 5, 0, 1) * mods.drift;
+          if (drifting) {
+            this.driftCharge += dt * clamp(this.slip / 5, 0, 1) * mods.drift;
+            this.driftPts += dt * 110 * clamp(this.slip / 5, 0, 1) * clamp(vF / 25, 0.5, 1.5);
+            this.chain.setLive(this.driftPts);
+          }
         }
         let cd = (tuck ? 0.004 : 0.006) * this.cdMul * mods.cd;
         if (this.onIce) cd *= 0.55;
@@ -498,10 +546,22 @@ export class Racer {
       vel.x *= f;
       vel.z *= f;
       if (controllable) {
-        vel.x += Math.cos(this.yaw) * steer * 5 * mods.airSteer * dt;
-        vel.z += -Math.sin(this.yaw) * steer * 5 * mods.airSteer * dt;
+        if (spinning) {
+          this.spinA -= inp.spin * SPIN_RATE * mods.flip * dt;
+        } else {
+          vel.x += Math.cos(this.yaw) * steer * 5 * mods.airSteer * dt;
+          vel.z += -Math.sin(this.yaw) * steer * 5 * mods.airSteer * dt;
+          if (this.spinA !== 0) {
+            const e = Math.round(this.spinA / TAU) * TAU - this.spinA;
+            if (Math.abs(e) < SPIN_SNAP) this.spinA += clamp(e, -3.2 * dt, 3.2 * dt);
+          }
+        }
         // 翻跟头
         if (inp.flip && !this.finished) this.flip += inp.flip * FLIP_RATE * mods.flip * dt;
+        this.grabbing = !!inp.grab && !this.finished && this.airT > 0.06;
+        if (this.grabbing) this.grabT += dt;
+      } else {
+        this.grabbing = false;
       }
     }
     inp.jump = false;
@@ -554,8 +614,8 @@ export class Racer {
           this.grounded = false;
           this.pos.y += 0.05;
           game.sfxAt('boing', this.pos, Math.min(1, impact / 12));
-        } else if (this.state === 'ski' && this.flip !== 0) {
-          this.landTrick();
+        } else if (this.state === 'ski') {
+          this.landAir(this.airT);
         }
         this.airT = 0;
       }
@@ -616,13 +676,25 @@ export class Racer {
     }
 
     // 机器人刚离地时，估一下滞空时间，够长就翻跟头
+    // 再按难度决定要不要转体、抓板
     if (this.wasGrounded && !this.grounded && !this.isPlayer && this.state === 'ski' && !this.finished) {
-      this.ai.flipN = 0;
-      if (Math.random() < [0.3, 0.6, 0.9][game.rules.difficulty]) {
-        this.ai.flipN = clamp(Math.floor((this.predictAir() - 0.3) / (0.85 / this.mods.flip)), 0, 2);
+      const ai = this.ai;
+      const dif = game.rules.difficulty;
+      const air = this.predictAir();
+      ai.flipN = 0;
+      ai.spinN = 0;
+      ai.grabEnd = 0;
+      if (Math.random() < [0.3, 0.6, 0.9][dif]) {
+        ai.flipN = clamp(Math.floor((air - 0.3) / (0.85 / this.mods.flip)), 0, 2);
       }
+      if (Math.random() < [0.15, 0.35, 0.6][dif]) {
+        ai.spinN = clamp(Math.floor((air - 0.35) / (0.75 / this.mods.flip)), 0, 2);
+        ai.spinDir = Math.random() < 0.5 ? -1 : 1;
+      }
+      if (air > 0.9 && Math.random() < [0.2, 0.4, 0.65][dif]) ai.grabEnd = air - 0.35;
     }
     this.wasGrounded = this.grounded;
+    if (!this.finished) this.chain.update(dt);
 
     // 卡住 / 出界自动复位
     if (this.state === 'ski' && !this.finished) {
@@ -644,8 +716,8 @@ export class Racer {
 
     const vis = this.vis;
     vis.steer = this.drifting ? this.driftDir * 1.5 : steer;
-    vis.tuck = tuck || this.flip !== 0;
-    vis.brake = brake;
+    vis.tuck = tuck || this.flip !== 0 || this.spinA !== 0;
+    vis.brake = brake && !this.grabbing;
     this.syncVisual(dt, vis.steer, vis.tuck, vis.brake);
   }
 
@@ -688,10 +760,12 @@ export class Racer {
     if (this.owned) return;
     this.owned = true;
     this.netReset();
-    this.input = { steer: 0, tuck: false, brake: false, jump: false, drift: false, flip: 0 };
+    this.input = { steer: 0, tuck: false, brake: false, jump: false, drift: false, flip: 0, spin: 0, grab: false };
     this.drifting = false;
     this.driftCharge = 0;
-    this.flip = 0;
+    this.driftPts = 0;
+    this.clearAir();
+    this.chain.reset();
     this.hookT = 0;
     this.stuckT = 0;
     this.offT = 0;
@@ -767,6 +841,8 @@ export class Racer {
     this.shieldT = s.shield;
     this.invulnT = s.invuln;
     this.flip = s.flip !== 0 && b.flip !== 0 ? lerp(a.flip, b.flip, k) : s.flip;
+    this.spinA = s.spin !== 0 && b.spin !== 0 ? lerp(a.spin, b.spin, k) : s.spin;
+    this.grabbing = !!(s.f2 & 16);
     if (s.weapon !== this.weapon) {
       this.weapon = s.weapon;
       this.skier.setProp(s.weapon ? WEAPONS[s.weapon].prop : null);
@@ -844,8 +920,9 @@ export class Racer {
       this.skier.spin.quaternion.premultiply(_q);
       if (this.grounded) this.spinSpeed = Math.max(3.5, this.spinSpeed * Math.exp(-0.9 * dt));
       g.position.y += 0.3;
-    } else if (this.flip !== 0) {
-      this.skier.spin.quaternion.setFromAxisAngle(XA, this.flip);
+    } else if (this.flip !== 0 || this.spinA !== 0) {
+      const q = this.skier.spin.quaternion.setFromAxisAngle(Y, this.spinA);
+      if (this.flip !== 0) q.multiply(_q.setFromAxisAngle(XA, this.flip));
     } else {
       this.skier.spin.quaternion.slerp(_qi.identity(), damp(14, dt));
     }
@@ -861,6 +938,7 @@ export class Racer {
       thaw: this.frozenT,
       hasProp: !!(this.weapon && WEAPONS[this.weapon].prop),
       boost: this.boostT > 0 || this.turboT > 0,
+      grab: this.grabbing && !tumbling,
     });
     this.skier.shield.visible = this.shieldT > 0;
     if (this.shieldT > 0) this.skier.shield.material.opacity = this.shieldT < 1 ? 0.12 + 0.2 * Math.abs(Math.sin(this.t * 14)) : 0.28;
@@ -921,12 +999,18 @@ export class Racer {
     const inp = this.input;
     inp.drift = false;
     inp.flip = 0;
+    inp.spin = 0;
+    inp.grab = false;
     if (this.state !== 'ski' || this.frozenT > 0) {
       inp.steer = 0;
       return;
     }
-    // 腾空时间够就翻跟头（flipN 在离地瞬间算好）
-    if (!this.grounded && ai.flipN > 0 && Math.abs(this.flip) < TAU * ai.flipN - 0.05) inp.flip = 1;
+    // 腾空时间够就翻跟头 / 转体 / 抓板（在离地瞬间算好）
+    if (!this.grounded) {
+      if (ai.flipN > 0 && Math.abs(this.flip) < TAU * ai.flipN - 0.05) inp.flip = 1;
+      if (ai.spinN > 0 && Math.abs(this.spinA) < TAU * ai.spinN - 0.05) inp.spin = ai.spinDir;
+      if (this.airT > 0.12 && this.airT < ai.grabEnd) inp.grab = true;
+    }
     const d = this.d;
     const sp = this.speed;
 
