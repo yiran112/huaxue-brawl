@@ -1,20 +1,21 @@
 // 玩家存档与成长：等级经验、雪花币、解锁购买、装备强化、每日任务、成就、生涯数据、结算奖励。
-// 全部存在浏览器本地（localStorage）。
-import { HATS, MODE_KEYS, MODES } from './config.js';
+// 浏览器里留一份缓存；账号登录之后，服务器上的那份为准（见 src/account.js）。
+import { HATS, MODE_KEYS, MODES, POINTS } from './config.js';
 import { GEAR, GEAR_KEYS, RARITY, UP_KEYS, UP_MAX, UP_COST, HAT_UNLOCK, COSMETIC_SLOTS } from './gear.js';
-import { CUPS, CHALLENGES } from './tracks.js';
+import { CUPS, TRACKS, medalTimes } from './tracks.js';
+import { RANK_LV, RANK_MAP, tierAt, scoreRank, localDay } from './rank.js';
 import { mulberry32 } from './util.js';
 
 const LS = 'huaxue_profile_v1';
 export const MAX_LV = 60;
-export const CUP_LV = [0, 4, 8, 12]; // 不拿上一杯的奖杯，到这个等级也能直接参加
+export const CUP_LV = [0, 4, 8, 12]; // 赛道分组按等级解锁
 export const START_COINS = 300;
 // 从 lv 升到 lv+1 需要的经验
 export const xpNeed = (lv) => 150 + (lv - 1) * 60;
 
-const TASK_XP = 80;
-const TASK_COINS = 60;
-const TASK_BONUS = 150; // 当天三个任务全做完的额外奖励
+export const TASK_XP = 80;
+export const TASK_COINS = 60;
+export const TASK_BONUS = 150; // 当天三个任务全做完的额外奖励
 
 // key：对应一局比赛统计里的字段（modes 特殊处理：当天玩过几种模式）
 export const TASKS = [
@@ -27,7 +28,7 @@ export const TASKS = [
   { id: 'win1', name: '赢得 1 场比赛', goal: 1, key: 'wins' },
   { id: 'modes2', name: '玩 2 种不同的模式', goal: 2, key: 'modes' },
   { id: 'pad6', name: '冲过 6 条加速带', goal: 6, key: 'pads' },
-  { id: 'cup1', name: '完成 1 场杯赛比赛', goal: 1, key: 'cupRaces' },
+  { id: 'cup1', name: '完成 1 场排位赛', goal: 1, key: 'cupRaces' },
   { id: 'chain4', name: '结算 1 条 ×4 以上的技巧链', goal: 1, key: 'chain4' },
   { id: 'skill20k', name: '累计拿到 20000 技巧分', goal: 20000, key: 'skill' },
   { id: 'spin5', name: '完成 5 次转体', goal: 5, key: 'spins' },
@@ -65,10 +66,10 @@ export const ACHIEVEMENTS = [
   { id: 'gearS', name: '传说入手', desc: '拥有一件 S 级滑行装备', test: (s, p) => GEAR_KEYS.some((k) => GEAR[k].rarity === 'S' && p.gearOwned(k)), coins: 800, title: '传说收藏' },
   { id: 'gearFull', name: '车库满员', desc: '拥有全部滑行装备', test: (s, p) => GEAR_KEYS.every((k) => p.gearOwned(k)), coins: 2500, title: '车库满员' },
   { id: 'upMax', name: '改装狂人', desc: '把一件装备的三条强化全部升满', test: (s, p) => GEAR_KEYS.some((k) => UP_KEYS.every((u) => p.up(k)[u] >= UP_MAX)), coins: 600 },
-  { id: 'gold1', name: '金杯得主', desc: '第一次拿到杯赛金杯', test: (s, p) => Object.values(p.data.cups).some((t) => t >= 3), coins: 500, title: '金杯得主' },
-  { id: 'cupAll', name: '大满贯', desc: '四个杯赛全部拿到金杯', test: (s, p) => CUPS.every((c) => (p.data.cups[c.id] || 0) >= 3), coins: 2000, title: '大满贯' },
-  { id: 'chal5', name: '挑战者', desc: '完成 5 个挑战', test: (s, p) => Object.keys(p.data.chal).length >= 5, coins: 400 },
-  { id: 'chalAll', name: '无所不能', desc: '完成全部挑战', test: (s, p) => CHALLENGES.every((c) => p.data.chal[c.id]), coins: 1500, title: '挑战王' },
+  { id: 'gold1', name: '踏入白银', desc: '排位达到白银', test: (s, p) => p.rankPoints() >= 100, coins: 500, title: '白银车手' },
+  { id: 'cupAll', name: '黄金车手', desc: '排位达到黄金', test: (s, p) => p.rankPoints() >= 250, coins: 800, title: '黄金车手' },
+  { id: 'chal5', name: '排位新秀', desc: '完成 5 场排位赛', test: (s, p) => (p.data.rank && p.data.rank.games) >= 5, coins: 400 },
+  { id: 'chalAll', name: '钻石车手', desc: '排位达到钻石', test: (s, p) => p.rankPoints() >= 700, coins: 1500, title: '钻石车手' },
   { id: 'modesAll', name: '全能选手', desc: '每种模式都玩过一次', test: (s, p) => MODE_KEYS.every((k) => p.data.modes[k]), coins: 400 },
   { id: 'teamWin', name: '团队之光', desc: '赢得一场团队赛', test: (s) => s.teamWins >= 1, coins: 200 },
   { id: 'elimWin', name: '最后的幸存者', desc: '赢得一场淘汰赛', test: (s) => s.elimWins >= 1, coins: 200 },
@@ -84,6 +85,55 @@ export const STAT_LABELS = [
   ['skill', '累计技巧分'], ['bestChain', '最高单条技巧链'], ['bestMult', '最高技巧链倍率'],
   ['maxSpeed', '最高时速（km/h）'], ['maxAir', '最长滞空（秒）'], ['coinsEarned', '累计获得雪花币'], ['playTime', '比赛总时长（分钟）'],
 ];
+
+// 赛季按北京时间，每周一 0 点换。第 1 赛季从 2026-11-16 那周开始。
+const SEASON_TZ = 8 * 3600000;
+const SEASON_EPOCH = Date.UTC(2026, 10, 16) - SEASON_TZ;
+const SEASON_WEEK = 7 * 86400000;
+
+export function blankSeason(id) {
+  return { id, points: 0, hits: 0, tt: 0, ttTrack: '', ttTime: 0 };
+}
+
+export function seasonNow(now = Date.now()) {
+  const shifted = new Date(now + SEASON_TZ);
+  const dayStart = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate()) - SEASON_TZ;
+  const id = Math.floor((dayStart - SEASON_EPOCH) / SEASON_WEEK) + 1;
+  const start = SEASON_EPOCH + (Math.max(1, id) - 1) * SEASON_WEEK;
+  return { id: Math.max(1, id), start, end: start + SEASON_WEEK, left: start + SEASON_WEEK - now };
+}
+
+export function seasonLeftText(ms) {
+  const min = Math.max(0, Math.ceil(ms / 60000));
+  const d = Math.floor(min / 1440);
+  const h = Math.floor((min % 1440) / 60);
+  if (d) return `${d} 天 ${h} 小时后结束`;
+  if (h) return `${h} 小时 ${min % 60} 分钟后结束`;
+  return `${Math.max(1, min)} 分钟后结束`;
+}
+
+// 积分榜名次奖励。击飞榜和计时榜只排名，不另发雪花币。
+export function seasonReward(rank) {
+  if (rank === 1) return 500;
+  if (rank === 2 || rank === 3) return 250;
+  if (rank >= 4 && rank <= 10) return 120;
+  if (rank >= 11 && rank <= 50) return 40;
+  return 0;
+}
+
+export function normalizeSeason(raw) {
+  const s = blankSeason(0);
+  if (!raw || typeof raw !== 'object') return s;
+  s.id = clampNum(raw.id, 0, 100000);
+  s.points = clampNum(raw.points, 0, 1000000);
+  s.hits = clampNum(raw.hits, 0, 1000000);
+  const tt = Number(raw.tt);
+  if (Number.isFinite(tt) && tt > 0 && tt < 20) s.tt = Math.round(tt * 1000) / 1000;
+  if (TRACK_IDS.has(raw.ttTrack)) s.ttTrack = raw.ttTrack;
+  const ttTime = Number(raw.ttTime);
+  if (Number.isFinite(ttTime) && ttTime > 0 && ttTime < 86400) s.ttTime = Math.round(ttTime * 100) / 100;
+  return s;
+}
 
 const defaults = () => ({
   v: 1,
@@ -103,37 +153,195 @@ const defaults = () => ({
   medals: {}, // 计时赛最好奖牌：{ 赛道 key: 1~3 }
   ach: {}, // 成就：{ id: 时间戳 }
   cups: {}, // 杯赛最好成绩：{ id: 1 铜 / 2 银 / 3 金 }
-  chal: {}, // 已完成的挑战
+  chal: {}, // 旧档里的挑战记录，不再使用
+  rank: null, // 排位：{ pts, games, wins, day, season }
   daily: null,
+  season: blankSeason(0),
 });
 
-function todayKey() {
+// days：往后数几天（0 = 今天）
+function todayKey(days = 0) {
   const d = new Date();
+  if (days) d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// 某一天的三个每日任务：只由日期决定，所以明天是哪三个今天就能算出来
+function pickTasks(dateKey) {
+  let h = 0;
+  for (const ch of dateKey) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0;
+  const rng = mulberry32(h);
+  const pool = TASKS.slice();
+  const out = [];
+  while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+  return out;
+}
+
+const TRACK_IDS = new Set(TRACKS.map((t) => t.id));
+const TITLE_ACH = new Map(ACHIEVEMENTS.filter((a) => a.title).map((a) => [a.title, a.id]));
+const STAT_CAP = {
+  maxFlip: 30, maxSpin: 30, maxGrab: 30, maxSpeed: 400, maxAir: 120,
+  bestChain: 1e8, bestMult: 10, bestTrick: 1e8, bestBrawl: 100, playTime: 1e7,
+};
+
+function clampNum(v, lo, hi) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return lo;
+  return Math.min(hi, Math.max(lo, Math.round(n)));
+}
+
+function clampDec(v, lo, hi, places) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return lo;
+  const m = 10 ** places;
+  return Math.min(hi, Math.max(lo, Math.round(n * m) / m));
+}
+
+function mergeProfile(saved) {
+  const def = defaults();
+  const src = saved && typeof saved === 'object' ? saved : {};
+  const d = { ...def, ...src, v: 1 };
+  d.stats = { ...def.stats, ...(src.stats || {}) };
+  for (const k of ['owned', 'up', 'modes', 'best', 'medals', 'ach', 'cups', 'chal']) d[k] = { ...(src[k] || {}) };
+  d.season = normalizeSeason(src.season);
+  return d;
+}
+
+function readLocal() {
+  try {
+    return JSON.parse(localStorage.getItem(LS)) || {};
+  } catch {
+    return {};
+  }
+}
+
+// 服务器收存档时用：只留已知字段，数值卡在合理范围内。
+export function sanitizeProfile(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const d = defaults();
+  d.xp = clampNum(src.xp, 0, 200000);
+  d.coins = clampNum(src.coins, 0, 10000000);
+  const titleAch = TITLE_ACH.get(src.title);
+  d.title = '';
+  d.owned = {};
+  if (src.owned && typeof src.owned === 'object') {
+    for (const key of Object.keys(src.owned)) {
+      if (Object.keys(d.owned).length >= 200 || !src.owned[key]) continue;
+      const [slot, id] = String(key).split(':');
+      if (!id || String(key).split(':').length !== 2) continue;
+      if (slot === 'gear' && GEAR_KEYS.includes(id)) d.owned[key] = true;
+      else if (slot === 'hat' && /^\d+$/.test(id) && +id < HATS.length) d.owned[key] = true;
+      else if (COSMETIC_SLOTS[slot] && /^\d+$/.test(id) && +id < COSMETIC_SLOTS[slot].list.length) d.owned[key] = true;
+    }
+  }
+  d.up = {};
+  if (src.up && typeof src.up === 'object') {
+    for (const g of GEAR_KEYS) {
+      const row = src.up[g];
+      if (!row || typeof row !== 'object') continue;
+      const out = {};
+      for (const k of UP_KEYS) {
+        const n = clampNum(row[k], 0, UP_MAX);
+        if (n) out[k] = n;
+      }
+      if (Object.keys(out).length) d.up[g] = out;
+    }
+  }
+  const statSrc = src.stats && typeof src.stats === 'object' ? src.stats : {};
+  for (const k of Object.keys(d.stats)) {
+    if (k === 'maxGrab' || k === 'maxAir' || k === 'playTime') d.stats[k] = clampDec(statSrc[k], 0, STAT_CAP[k] || 1e9, 1);
+    else d.stats[k] = clampNum(statSrc[k], 0, STAT_CAP[k] || 1e9);
+  }
+  if (src.modes && typeof src.modes === 'object') for (const k of MODE_KEYS) if (src.modes[k]) d.modes[k] = true;
+  if (src.best && typeof src.best === 'object') {
+    for (const id of TRACK_IDS) {
+      const t = Number(src.best[id]);
+      if (Number.isFinite(t) && t > 0 && t < 86400) d.best[id] = Math.round(t * 100) / 100;
+    }
+  }
+  if (src.medals && typeof src.medals === 'object') {
+    for (const id of TRACK_IDS) {
+      const n = clampNum(src.medals[id], 0, 3);
+      if (n) d.medals[id] = n;
+    }
+  }
+  if (src.ach && typeof src.ach === 'object') {
+    for (const a of ACHIEVEMENTS) {
+      const n = clampNum(src.ach[a.id], 0, 1e14);
+      if (n) d.ach[a.id] = n;
+    }
+  }
+  if (titleAch && d.ach[titleAch]) d.title = src.title;
+  if (src.cups && typeof src.cups === 'object') {
+    for (const c of CUPS) {
+      const n = clampNum(src.cups[c.id], 0, 3);
+      if (n) d.cups[c.id] = n;
+    }
+  }
+  d.rank = sanitizeRank(src.rank);
+  d.daily = sanitizeDaily(src.daily);
+  d.season = normalizeSeason(src.season);
+  return d;
+}
+
+function sanitizeRank(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  return {
+    pts: clampNum(r.pts, 0, 100000),
+    games: clampNum(r.games, 0, 1e7),
+    wins: clampNum(r.wins, 0, 1e7),
+    day: typeof r.day === 'string' ? r.day.slice(0, 16) : '',
+    season: clampNum(r.season, 0, 100000),
+  };
+}
+
+function sanitizeDaily(raw) {
+  if (!raw || typeof raw !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date || '') || !Array.isArray(raw.tasks)) return null;
+  const tasks = [];
+  const seen = new Set();
+  for (const t of raw.tasks) {
+    if (!t || !TASK_MAP[t.id] || seen.has(t.id)) continue;
+    seen.add(t.id);
+    const goal = TASK_MAP[t.id].goal;
+    const prog = clampNum(t.prog, 0, goal);
+    tasks.push({ id: t.id, prog, done: !!t.done && prog >= goal });
+    if (tasks.length >= 3) break;
+  }
+  if (tasks.length !== 3) return null;
+  const modes = {};
+  if (raw.modes && typeof raw.modes === 'object') for (const k of MODE_KEYS) if (raw.modes[k]) modes[k] = true;
+  const bonus = !!raw.bonus && tasks.every((t) => t.done);
+  return { date: raw.date, tasks, modes, bonus };
 }
 
 export class Profile {
   constructor() {
-    const def = defaults();
-    let saved = {};
-    try {
-      saved = JSON.parse(localStorage.getItem(LS)) || {};
-    } catch {
-      saved = {};
-    }
-    const d = { ...def, ...saved };
-    d.stats = { ...def.stats, ...(saved.stats || {}) };
-    for (const k of ['owned', 'up', 'modes', 'best', 'medals', 'ach', 'cups', 'chal']) d[k] = { ...(saved[k] || {}) };
-    this.data = d;
+    this.onSave = null;
+    this._silent = false;
+    this.data = mergeProfile(readLocal());
     this.ensureDaily();
   }
 
-  save() {
+  _writeLocal() {
     try {
       localStorage.setItem(LS, JSON.stringify(this.data));
     } catch {
       /* 存不下就算了 */
     }
+  }
+
+  save() {
+    this._writeLocal();
+    if (!this._silent && this.onSave) this.onSave();
+  }
+
+  // 用服务器上的存档换掉本地这份。同一天的每日任务不会因此再上传一次。
+  loadData(saved) {
+    this._silent = true;
+    this.data = mergeProfile(saved);
+    this._writeLocal();
+    this._silent = false;
+    this.ensureDaily();
   }
 
   // ---------- 等级 ----------
@@ -224,20 +432,47 @@ export class Profile {
   }
 
   // ---------- 赛事解锁 ----------
-  // 第 i 个杯赛：上一个杯赛拿到任意奖杯，或者等级够了
+  // 第 i 组赛道：等级够了就能选
   cupUnlocked(i) {
-    if (i <= 0) return true;
-    return (this.data.cups[CUPS[i - 1].id] || 0) >= 1 || this.level >= CUP_LV[i];
+    return this.level >= (CUP_LV[i] || 0);
   }
 
-  // 固定赛道在快速赛里能不能选：所属杯赛已解锁
+  // 固定赛道在赛道大厅里能不能选：所属分组的等级到了
   trackUnlocked(id) {
     const k = CUPS.findIndex((c) => c.tracks.includes(id));
     return k >= 0 && this.cupUnlocked(k);
   }
 
-  challengeUnlocked(ch) {
-    return this.level >= (ch.lv || 1);
+  rankOpen() {
+    return this.level >= RANK_LV;
+  }
+
+  rankPoints() {
+    return this.rankState().pts;
+  }
+
+  // 换赛季时保留七成积分，当作新赛季的起点
+  rankState() {
+    const now = seasonNow();
+    let r = this.data.rank;
+    if (!r || typeof r !== 'object') r = this.data.rank = { pts: 0, games: 0, wins: 0, day: '', season: now.id };
+    r.pts = Math.max(0, r.pts | 0);
+    r.games = Math.max(0, r.games | 0);
+    r.wins = Math.max(0, r.wins | 0);
+    if ((r.season | 0) !== now.id) {
+      r.pts = Math.floor(r.pts * 0.7);
+      r.season = now.id;
+      this.save();
+    }
+    return r;
+  }
+
+  rankView() {
+    const r = this.rankState();
+    const t = tierAt(r.pts);
+    const star = t.star ? `${'★'.repeat(t.star)}${'☆'.repeat(5 - t.star)}` : '';
+    const next = t.next ? `距${t.nextName}还差 ${t.next - r.pts}` : '已是最高段位';
+    return { ...t, pts: r.pts, games: r.games, wins: r.wins, star, line: `${t.name}${star ? ' ' + star : ''} · ${r.pts} 分`, next };
   }
 
   // ---------- 称号 ----------
@@ -254,15 +489,7 @@ export class Profile {
   ensureDaily() {
     const today = todayKey();
     if (this.data.daily && this.data.daily.date === today) return;
-    let h = 0;
-    for (const ch of today) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0;
-    const rng = mulberry32(h);
-    const pool = TASKS.slice();
-    const tasks = [];
-    while (tasks.length < 3 && pool.length) {
-      const t = pool.splice(Math.floor(rng() * pool.length), 1)[0];
-      tasks.push({ id: t.id, prog: 0, done: false });
-    }
+    const tasks = pickTasks(today).map((t) => ({ id: t.id, prog: 0, done: false }));
     this.data.daily = { date: today, tasks, modes: {}, bonus: false };
     this.save();
   }
@@ -270,6 +497,17 @@ export class Profile {
   dailyTasks() {
     this.ensureDaily();
     return this.data.daily.tasks.map((t) => ({ ...TASK_MAP[t.id], prog: t.prog, done: t.done }));
+  }
+
+  // 明天会刷出来的三个任务（预告用）
+  dailyPreview() {
+    return pickTasks(todayKey(1));
+  }
+
+  // 今天三个任务全做完的额外奖励有没有发过
+  get dailyBonusDone() {
+    this.ensureDaily();
+    return !!this.data.daily.bonus;
   }
 
   // ---------- 成就 ----------
@@ -297,6 +535,28 @@ export class Profile {
       COSMETIC_SLOTS[slot].list.forEach((it, i) => hit(it.unlock) && out.push(`${COSMETIC_SLOTS[slot].name}「${it.name}」${it.unlock.cost ? '（可购买）' : ''}`));
     }
     return out;
+  }
+
+  // 本周赛季成绩。换周后的第一场会先把旧周清掉，奖励由界面在连上服务器后结算。
+  noteSeason(rep) {
+    const now = seasonNow();
+    if (!this.data.season || this.data.season.id !== now.id) this.data.season = blankSeason(now.id);
+    const s = this.data.season;
+    if (rep.mode === 'tt' && rep.kind === 'quick' && rep.finished && rep.track && rep.length > 0) {
+      const [gold] = medalTimes(rep.length);
+      const ratio = gold > 0 ? rep.time / gold : 0;
+      if (ratio > 0 && (!s.tt || ratio < s.tt)) {
+        s.tt = Math.round(ratio * 1000) / 1000;
+        s.ttTrack = rep.track;
+        s.ttTime = Math.round(rep.time * 100) / 100;
+      }
+    }
+    const placed = rep.finished || rep.mode === 'elim';
+    const ranked = (rep.kind === 'quick' || rep.kind === 'online') && rep.mode !== 'tt' && rep.field >= 4 && rep.difficulty >= 1 && placed;
+    if (!ranked) return;
+    const base = POINTS[rep.rank - 1] || 0;
+    s.points += rep.difficulty >= 2 ? Math.floor(base * 1.5) : base;
+    s.hits += rep.hits || 0;
   }
 
   // ---------- 结算 ----------
@@ -354,7 +614,7 @@ export class Profile {
       driftBoosts: rep.driftBoosts,
       shortcuts: rep.shortcuts,
       pads: rep.pads,
-      cupRaces: rep.kind === 'cup' ? 1 : 0,
+      cupRaces: rep.kind === 'rank' ? 1 : 0,
       spins: rep.spins | 0,
       grabs: rep.grabs | 0,
       skill: rep.skill | 0,
@@ -377,6 +637,8 @@ export class Profile {
     if (rep.mode === 'brawl') s.bestBrawl = Math.max(s.bestBrawl, rep.hits);
     if (rep.mode === 'tt' && rep.medal >= 3) s.ttGold++;
     d.modes[rep.mode] = true;
+    this.noteSeason(rep);
+    if (rep.kind === 'rank') lines.push(this.applyRank(rep));
 
     d.xp += tx;
     this.addCoins(tc);
@@ -426,24 +688,19 @@ export class Profile {
     };
   }
 
-  // 杯赛打完：记录最好奖杯，返回这次的奖励（按奖杯折算，首次拿到更好的奖杯另加一半）
-  cupResult(cup, trophy) {
-    const prev = this.data.cups[cup.id] || 0;
-    if (trophy > prev) this.data.cups[cup.id] = trophy;
-    const k = [0, 0.4, 0.6, 1][trophy];
-    const first = trophy > prev ? 1.5 : 1;
+  applyRank(rep) {
+    const state = this.rankState();
+    const scored = scoreRank(state, rep);
+    if (!scored) return { label: '排位未结算', note: true };
+    state.pts = scored.after;
+    state.games++;
+    if (scored.win) state.wins++;
+    if (scored.win) state.day = localDay();
+    const now = tierAt(state.pts);
     this.save();
-    return { coins: Math.round(cup.reward.coins * k * first), xp: Math.round(cup.reward.xp * k * first), first: trophy > prev };
-  }
-
-  challengeResult(ch, ok) {
-    if (!ok) return null;
-    const first = !this.data.chal[ch.id];
-    this.data.chal[ch.id] = true;
-    this.save();
-    // 重复完成只给三成
-    const k = first ? 1 : 0.3;
-    return { coins: Math.round(ch.reward.coins * k), xp: Math.round(ch.reward.xp * k), first };
+    const sign = scored.delta > 0 ? `+${scored.delta}` : `${scored.delta}`;
+    const extra = scored.first ? ' · 今日首胜' : '';
+    return { label: `${RANK_MAP[rep.rankMode] ? RANK_MAP[rep.rankMode].name : '排位'} ${sign} · ${now.name}${extra}`, note: true };
   }
 
   // 计时赛：返回 { pb, prev }

@@ -37,8 +37,7 @@ export class Net {
     return this.active && this.hostId === this.id;
   }
 
-  // 进入匹配队列
-  match(name, look) {
+  connect(ready) {
     this.leave();
     this.phase = 'connecting';
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -54,8 +53,11 @@ export class Net {
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       if (this.ws !== ws) return;
-      this.phase = 'queue';
-      this.sendJson({ t: 'queue', name, look });
+      if (this.pendingEnter) {
+        this.phase = 'queue';
+        this.sendJson(this.pendingEnter);
+        this.pendingEnter = null;
+      } else ready();
     };
     ws.onmessage = (e) => {
       if (this.ws !== ws) return;
@@ -71,10 +73,43 @@ export class Net {
     };
   }
 
+  // 进入匹配队列，每种玩法各排各的队
+  match(name, look, mode, rank) {
+    this.connect(() => {});
+    this.pendingEnter = { t: 'queue', name, look, mode, rank: rank || '' };
+  }
+
+  // 只看房间列表，先不进任何房间
+  watch() {
+    this.pendingEnter = null;
+    if (this.ws && this.ws.readyState === 1 && (this.phase === 'watch' || this.phase === 'connecting')) {
+      this.phase = 'watch';
+      this.sendJson({ t: 'watch' });
+      return;
+    }
+    this.connect(() => {
+      this.phase = 'watch';
+      this.sendJson({ t: 'watch' });
+    });
+  }
+
+  // 创建 / 加入 / 快速进房。还没连上就等连接成功再发。
+  enter(msg) {
+    if (this.ws && this.ws.readyState === 1) {
+      this.pendingEnter = null;
+      this.phase = 'queue';
+      this.sendJson(msg);
+      return;
+    }
+    if (this.phase !== 'connecting') this.connect(() => {});
+    this.pendingEnter = msg;
+  }
+
   // 离开队列 / 房间（主动断开，不触发断线回调）
   leave() {
     const ws = this.ws;
     this.ws = null;
+    this.pendingEnter = null;
     this.phase = 'off';
     if (!ws) return;
     ws.onopen = ws.onmessage = ws.onclose = null;
@@ -125,6 +160,9 @@ export class Net {
         break;
       case 'room':
         if (this.phase === 'queue') game.onNetRoom(m);
+        break;
+      case 'lobby':
+        if (this.phase === 'watch' || this.phase === 'queue') game.onNetLobby(m);
         break;
       case 'start':
         if (this.phase !== 'queue' || !Array.isArray(m.roster)) break;

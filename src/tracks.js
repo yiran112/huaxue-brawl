@@ -1,5 +1,4 @@
-// 手工设计的固定赛道、杯赛、挑战关卡。
-// 赛道的地形仍由种子生成，这里规定种子、长度、场景，以及地标 / 地表 / 加速带 / 移动障碍 / 雪崩放在哪里。
+// 手工设计的固定赛道。地形仍由种子生成，这里规定种子、长度、场景，以及地标放在哪里。
 // 位置一律写成全程的比例（at: 0~1），实际位置会自动避开近道岔口和跳台。
 
 export const TRACKS = [
@@ -104,113 +103,17 @@ export function medalTimes(length) {
 }
 
 export const CUPS = [
-  { id: 'c1', name: '新手杯', icon: '❄️', tracks: ['cedar', 'cablecar', 'lumber'], difficulty: 0, botUp: 0, reward: { coins: 400, xp: 300 } },
-  { id: 'c2', name: '进阶杯', icon: '🌙', tracks: ['icelake', 'crystal', 'dusk'], difficulty: 1, botUp: 1, reward: { coins: 700, xp: 450 } },
-  { id: 'c3', name: '精英杯', icon: '⛰️', tracks: ['mine', 'aurora', 'summit'], difficulty: 1, botUp: 2, reward: { coins: 1000, xp: 600 } },
-  { id: 'c4', name: '冠军杯', icon: '👑', tracks: ['glacier', 'avalanche', 'ultimate'], difficulty: 2, botUp: 3, reward: { coins: 1500, xp: 900 } },
+  { id: 'c1', name: '新手', icon: '❄️', tracks: ['cedar', 'cablecar', 'lumber'], difficulty: 0, botUp: 0, reward: { coins: 400, xp: 300 } },
+  { id: 'c2', name: '进阶', icon: '🌙', tracks: ['icelake', 'crystal', 'dusk'], difficulty: 1, botUp: 1, reward: { coins: 700, xp: 450 } },
+  { id: 'c3', name: '精英', icon: '⛰️', tracks: ['mine', 'aurora', 'summit'], difficulty: 1, botUp: 2, reward: { coins: 1000, xp: 600 } },
+  { id: 'c4', name: '冠军', icon: '👑', tracks: ['glacier', 'avalanche', 'ultimate'], difficulty: 2, botUp: 3, reward: { coins: 1500, xp: 900 } },
 ];
 export const CUP_MAP = Object.fromEntries(CUPS.map((c) => [c.id, c]));
 export const TROPHY = ['', '🥉', '🥈', '🥇'];
 export const TROPHY_NAME = ['', '铜杯', '银杯', '金杯'];
 
-// 赛道属于第几个杯赛（快速赛里，杯赛解锁之后它的赛道才能单独选）
+// 赛道按等级分成四组，够等级就能在赛道大厅里选
 export function trackCup(id) {
   return CUPS.findIndex((c) => c.tracks.includes(id));
 }
 
-// test(report)：比赛结束时判定是否达成；prog(report)：结算时显示的进度
-export const CHALLENGES = [
-  {
-    id: 'goat', name: '山羊快递', icon: '🐐', lv: 1, track: 'cedar', mode: 'race',
-    desc: '道具只刷爆炸山羊，用它击飞对手 5 次',
-    rules: { bots: 7, difficulty: 1, itemRate: 2, only: ['goat'] },
-    test: (r) => (r.hitsBy['爆炸山羊'] || 0) >= 5, prog: (r) => `${r.hitsBy['爆炸山羊'] || 0} / 5`,
-    reward: { coins: 250, xp: 150 },
-  },
-  {
-    id: 'clean', name: '毫发无伤', icon: '🛡️', lv: 2, track: 'lumber', mode: 'race',
-    desc: '一次都不被击飞（撞树、空翻摔倒也算），跑完全程',
-    rules: { bots: 7, difficulty: 1 },
-    test: (r) => r.finished && r.knocked === 0, prog: (r) => `被击飞 ${r.knocked} 次`,
-    reward: { coins: 300, xp: 180 },
-  },
-  {
-    id: 'flip3', name: '三周跳', icon: '🤸', lv: 3, track: 'aurora', mode: 'speed',
-    desc: '单次腾空完成 3 圈空翻并稳稳落地',
-    rules: { bots: 3, difficulty: 0 },
-    test: (r) => r.maxFlip >= 3, prog: (r) => `最多 ${r.maxFlip} 圈`,
-    reward: { coins: 300, xp: 180 },
-  },
-  {
-    id: 'drift', name: '漂移大师', icon: '💨', lv: 4, track: 'cablecar', mode: 'speed',
-    desc: '一局里打出 6 次漂移大喷射（火花变粉色时松开）',
-    rules: { bots: 3, difficulty: 1 },
-    test: (r) => r.bigDrifts >= 6, prog: (r) => `${r.bigDrifts} / 6`,
-    reward: { coins: 300, xp: 200 },
-  },
-  {
-    id: 'combo', name: '连招达人', icon: '🔗', lv: 4, track: 'lumber', mode: 'speed',
-    desc: '结算一条 ×6 以上的技巧链：空翻、转体、抓板、漂移连着做，别摔',
-    rules: { bots: 3, difficulty: 0 },
-    test: (r) => r.bestMult >= 6, prog: (r) => `最高 ×${r.bestMult} · 最高单条 ${r.bestChain.toLocaleString()}`,
-    reward: { coins: 350, xp: 200 },
-  },
-  {
-    id: 'freeze', name: '冰封千里', icon: '🧊', lv: 5, track: 'crystal', mode: 'race',
-    desc: '道具只刷冰冻枪，冻住对手 3 次',
-    rules: { bots: 7, difficulty: 1, itemRate: 2, only: ['freeze'] },
-    test: (r) => (r.hitsBy['冰冻枪'] || 0) >= 3, prog: (r) => `${r.hitsBy['冰冻枪'] || 0} / 3`,
-    reward: { coins: 350, xp: 200 },
-  },
-  {
-    id: 'short', name: '路线鬼才', icon: '🗺️', lv: 6, track: 'icelake', mode: 'race',
-    desc: '一局里成功抄近道 2 次，并拿到前三名',
-    rules: { bots: 7, difficulty: 1 },
-    test: (r) => r.shortcuts >= 2 && r.finished && r.rank <= 3, prog: (r) => `近道 ${r.shortcuts} / 2 · 第 ${r.rank} 名`,
-    reward: { coins: 400, xp: 220 },
-  },
-  {
-    id: 'escape', name: '雪崩逃生', icon: '🏔️', lv: 7, track: 'dusk', mode: 'race',
-    desc: '不被雪崩吞没，并拿到前三名',
-    rules: { bots: 7, difficulty: 1 },
-    test: (r) => r.finished && !r.knockedBy['雪崩'] && r.rank <= 3, prog: (r) => `${r.knockedBy['雪崩'] ? '被雪崩卷走了' : '躲过雪崩'} · 第 ${r.rank} 名`,
-    reward: { coins: 400, xp: 240 },
-  },
-  {
-    id: 'sniper', name: '神枪手', icon: '🎯', lv: 8, track: 'summit', mode: 'race',
-    desc: '道具只刷火箭筒和追踪导弹，击飞对手 5 次',
-    rules: { bots: 7, difficulty: 1, itemRate: 2, only: ['rocket', 'homing'] },
-    test: (r) => (r.hitsBy['火箭筒'] || 0) + (r.hitsBy['追踪导弹'] || 0) >= 5,
-    prog: (r) => `${(r.hitsBy['火箭筒'] || 0) + (r.hitsBy['追踪导弹'] || 0)} / 5`,
-    reward: { coins: 450, xp: 260 },
-  },
-  {
-    id: 'speed', name: '风驰电掣', icon: '⚡', lv: 9, track: 'glacier', mode: 'race',
-    desc: '贴地滑行时速达到 210 km/h（俯冲、喷射、加速带、氮气都能帮你）',
-    rules: { bots: 5, difficulty: 1 },
-    test: (r) => r.maxSpeed >= 210, prog: (r) => `最高 ${r.maxSpeed} km/h`,
-    reward: { coins: 450, xp: 260 },
-  },
-  {
-    id: 'elim', name: '最后的幸存者', icon: '💀', lv: 10, track: 'mine', mode: 'elim',
-    desc: '在淘汰赛中活到最后，并第一个冲线',
-    rules: { bots: 7, difficulty: 1 },
-    test: (r) => r.rank === 1 && r.finished, prog: (r) => `第 ${r.rank} 名`,
-    reward: { coins: 500, xp: 300 },
-  },
-  {
-    id: 'trick', name: '特技表演', icon: '🌟', lv: 11, track: 'aurora', mode: 'trick',
-    desc: '特技赛单局拿到 20000 分（技巧链越长倍率越高）',
-    rules: { bots: 5, difficulty: 1 },
-    test: (r) => r.score >= 20000, prog: (r) => `${r.score.toLocaleString()} / 20,000`,
-    reward: { coins: 500, xp: 300 },
-  },
-  {
-    id: 'team', name: '并肩作战', icon: '🤝', lv: 12, track: 'ultimate', mode: 'team',
-    desc: '在困难难度下赢得团队赛',
-    rules: { difficulty: 2 },
-    test: (r) => !!r.teamWin, prog: (r) => (r.teamWin ? '红队获胜' : '蓝队获胜'),
-    reward: { coins: 600, xp: 350 },
-  },
-];
-export const CHALLENGE_MAP = Object.fromEntries(CHALLENGES.map((c) => [c.id, c]));

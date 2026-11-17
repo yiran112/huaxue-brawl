@@ -1,9 +1,11 @@
 // 雪山大乱斗 - 主程序
 import * as THREE from 'three';
-import { THEMES, THEME_KEYS, LENGTHS, LOOK_PRESETS, BOT_NAMES, DEFAULT_RULES, POINTS, SKINS, MODES, WEAPON_KEYS } from './config.js';
+import { THEMES, THEME_KEYS, LENGTHS, LOOK_PRESETS, BOT_NAMES, DEFAULT_RULES, POINTS, SKINS, MODES } from './config.js';
 import { GEAR, LOOK_EXTRA_DEFAULTS, COSMETIC_SLOTS, uniformUp, pickBotGear } from './gear.js';
-import { TRACK_MAP, CUP_MAP, CHALLENGE_MAP, TROPHY, TROPHY_NAME } from './tracks.js';
+import { TRACK_MAP } from './tracks.js';
+import { RANK_LV, RANK_MAP } from './rank.js';
 import { Profile } from './profile.js';
+import { Account } from './account.js';
 import { makeMode, TEAM_NAMES } from './modes.js';
 import { Hazards, NO_HAZARDS } from './hazards.js';
 import { GhostRecorder, GhostRunner, loadGhost, saveGhost } from './ghost.js';
@@ -58,6 +60,8 @@ const NO_ITEMS = { nearestAhead: () => null, update() {}, take() {}, dispose() {
 class Game {
   constructor() {
     this.profile = new Profile();
+    this.account = new Account(this);
+    this.profile.onSave = () => this.account.noteChanged();
     this.rules = { ...DEFAULT_RULES, ...load(LS_RULES) };
     if (!Array.isArray(this.rules.banned)) this.rules.banned = [];
     if (!THEMES[this.rules.theme] && this.rules.theme !== 'random') this.rules.theme = 'day';
@@ -68,7 +72,7 @@ class Game {
     if (this.look.skin < 16) this.look.skin = SKINS[this.look.skin];
     this.validateLook();
     this.playerHits = 0;
-    // 当前这一组比赛：quick 快速赛 / cup 杯赛 / challenge 挑战
+    // 当前这一组比赛：quick 快速赛 / rank 排位
     this.session = { kind: 'quick', mode: this.rules.mode, track: this.rules.track };
     this.mode = makeMode('race', this);
     this.hazards = NO_HAZARDS;
@@ -85,7 +89,8 @@ class Game {
     const savedName = load(LS_NAME);
     this.playerName = typeof savedName === 'string' ? savedName : '';
     this.net = new Net(this);
-    this.netMode = false; // 从点“联机匹配”到回大厅之间都是 true
+    this.netMode = false; // 从点“开始比赛”进匹配，到回大厅之间都是 true
+    this.customRoom = false; // 正在一间自己开的房间里，退出后回到房间列表
     this.matchPlayers = null; // 匹配中：房间里已经有的玩家
     this.matchEnd = 0;
     this.waitGo = false; // 赛道加载完了，在等其他人
@@ -120,10 +125,12 @@ class Game {
     this.fx = new FX(this.scene);
     this.weapons = new Weapons(this);
     this.ui = new UI(this);
+    this.beatPresence();
     this.seed = (Math.random() * 1e9) | 0;
     this.themeKey = this.resolveTheme();
     this.buildWorld();
     this.toMenu();
+    this.account.boot();
     this.bindInput();
     this.clock = new THREE.Clock();
     this.frameAt = 0;
@@ -292,6 +299,21 @@ class Game {
     return this.rules.theme;
   }
 
+  // 用服务器存档换掉本地缓存，并卸下这个账号还没解锁的外观
+  adoptProfile(data) {
+    this.profile.loadData(data);
+    this.validateLook();
+    save(LS_LOOK, this.look);
+    if (this.account.username && !this.playerName) this.setName(this.account.username);
+    this.ui.refreshProfile();
+    this.ui.refreshBoard();
+    if (this.state === 'menu') {
+      this.ui.renderTab(this.ui.tab);
+      this.buildLobby();
+      this.syncShow();
+    }
+  }
+
   // 存档里的外观如果用了没解锁的东西（比如存档被清过），换回默认
   validateLook() {
     const L = this.look;
@@ -454,6 +476,7 @@ class Game {
     this.ui.hideResults();
     this.ui.showHud(false);
     this.ui.showMatch(false);
+    this.ui.setQueue(false);
     this.ui.showMenu(true);
     this.ui.buildMenu();
     if (tab) this.ui.openTab(tab);
@@ -476,7 +499,10 @@ class Game {
     } else if (k === 'bots' || k === 'mode') {
       this.buildLobby();
     }
-    if (k === 'mode' || k === 'track') this.ui.renderTab('race');
+    if (k === 'mode' || k === 'track' || k === 'bots' || k === 'difficulty' || k === 'rounds') {
+      this.ui.renderTab('race');
+      if (this.ui.tab === 'set') this.ui.renderTab('set');
+    }
   }
 
   toggleBan(id) {
@@ -552,46 +578,50 @@ class Game {
     this.startRace(true);
   }
 
-  // 杯赛：三站固定赛道，按名次累计积分，总排名前三拿奖杯
-  startCup(id) {
-    const i = Object.keys(CUP_MAP).indexOf(id);
-    if (!CUP_MAP[id] || !this.profile.cupUnlocked(i) || this.state !== 'menu') return;
-    this.session = { kind: 'cup', cup: id, mode: 'race', raceIdx: 0 };
-    this.round = 1;
-    this.points = new Array(8).fill(0);
-    this.shuffleBots(CUP_MAP[id].difficulty ?? 1);
-    this.startRace(true);
-  }
-
-  startChallenge(id) {
-    const ch = CHALLENGE_MAP[id];
-    if (!ch || !this.profile.challengeUnlocked(ch) || this.state !== 'menu') return;
-    this.session = { kind: 'challenge', chal: id, mode: ch.mode, track: ch.track };
-    this.round = 1;
-    this.points = new Array(8).fill(0);
-    this.shuffleBots(ch.rules.difficulty ?? 1);
-    this.startRace(true);
+  startRank(id) {
+    if (this.state !== 'menu') return;
+    if (!this.profile.rankOpen()) {
+      this.ui.toast(`排位赛 Lv.${RANK_LV} 开启`, true);
+      return;
+    }
+    if (this.netMode) {
+      const spec0 = RANK_MAP[id] || RANK_MAP.solo;
+      const same = !this.customRoom && this.rankMode === spec0.id;
+      if (!this.customRoom) this.leavePublicQueue();
+      this.ui.racePick = 'rank';
+      if (same || this.customRoom) {
+        this.ui.renderTab('race');
+        return;
+      }
+    }
+    const spec = RANK_MAP[id] || RANK_MAP.solo;
+    this.rankMode = spec.id;
+    this.session = { kind: 'rank', mode: spec.rules.mode, rank: spec.id, track: 'random' };
+    this.sfx.init();
+    this.netMode = true;
+    this.customRoom = false;
+    this.matchPlayers = null;
+    this.ui.rankMode = spec.id;
+    this.ui.racePick = 'rank';
+    this.ui.showMatch(false);
+    this.ui.setQueue(true);
+    this.ui.renderTab('race');
+    this.net.match(this.playerName, this.look, spec.rules.mode, spec.queue);
   }
 
   nextRace() {
-    // 联机：打完一场接着匹配下一场
+    const rank = this.session && this.session.kind === 'rank' ? this.session.rank : '';
+    // 联机：打完一场接着匹配下一场；排位接着排同一项
     if (this.netMode) {
       this.toMenu();
-      this.startMatch();
+      if (rank) this.startRank(rank);
+      else this.startMatch();
       return;
     }
     const s = this.session;
-    if (s.kind === 'cup') {
-      if (s.raceIdx < 2) {
-        s.raceIdx++;
-        this.round = s.raceIdx + 1;
-        this.startRace(true);
-      } else this.toMenu('events');
-      return;
-    }
     // 计时赛：同一条赛道接着刷成绩
-    if (s.kind === 'challenge' || s.mode === 'tt') {
-      this.startRace(s.mode !== 'tt');
+    if (s.mode === 'tt') {
+      this.startRace(false);
       return;
     }
     if (this.rules.rounds > 1 && this.round < this.rules.rounds) {
@@ -607,24 +637,19 @@ class Game {
     this.startRace(false);
   }
 
-  // 这一局的实际规则：菜单规则 + 杯赛 / 挑战的固定设置 + 模式的要求
+  // 这一局的实际规则。排位的人数、道具和判胜由所选玩法定死。
   makeRules(s) {
     const base = this.soloRules;
     const r = { ...base, banned: base.banned.slice(), mode: s.mode || 'race' };
-    if (s.kind === 'cup') {
-      Object.assign(r, { bots: 7, difficulty: CUP_MAP[s.cup].difficulty, rounds: 1, items: true, itemRate: 1, wildlife: true, banned: [] });
-    } else if (s.kind === 'challenge') {
-      const ch = CHALLENGE_MAP[s.chal];
-      Object.assign(r, { bots: 7, difficulty: 1, rounds: 1, items: true, itemRate: 1, wildlife: true, banned: [] }, ch.rules);
-      delete r.only;
-      if (ch.rules.only) r.banned = WEAPON_KEYS.filter((k) => !ch.rules.only.includes(k));
-    }
+    const spec = s.kind === 'rank' ? RANK_MAP[s.rank] : null;
+    if (spec) Object.assign(r, spec.rules, { rounds: 1, difficulty: 1, wildlife: true, banned: [], track: 'random', theme: 'random' });
     const m = r.mode;
     if (m === 'speed' || m === 'trick') r.items = false;
     if (m === 'brawl') Object.assign(r, { items: true, itemRate: 3 });
     if (m === 'tt') Object.assign(r, { items: false, bots: 0, wildlife: false });
     if (m === 'elim') r.bots = Math.max(r.bots, 3);
     if (m === 'team') r.bots = 7;
+    if (spec) r.bots = Math.max(0, (spec.rules.seats || 6) - 1);
     if (m !== 'race' && m !== 'speed') r.rounds = 1;
     return r;
   }
@@ -633,7 +658,7 @@ class Game {
   startRace(newCourse) {
     const s = this.session;
     this.rules = this.makeRules(s);
-    const trackId = s.kind === 'cup' ? CUP_MAP[s.cup].tracks[s.raceIdx] : s.track;
+    const trackId = s.track;
     const def = trackId && trackId !== 'random' ? TRACK_MAP[trackId] || null : null;
     if (newCourse || def !== this.trackDef || (!def && this.course && this.course.def)) {
       newCourse = true;
@@ -641,7 +666,7 @@ class Game {
       if (!def) this.seed = (Math.random() * 1e9) | 0;
       this.themeKey = this.resolveTheme();
     }
-    const botUp = uniformUp(s.kind === 'cup' ? CUP_MAP[s.cup].botUp : [0, 1, 2][this.rules.difficulty] ?? 1);
+    const botUp = uniformUp([0, 1, 2][this.rules.difficulty] ?? 1);
     const roster = [];
     for (let i = 0; i < 1 + this.rules.bots; i++) {
       roster.push({
@@ -667,14 +692,17 @@ class Game {
     const p = this.player;
     return {
       ...this.rep,
-      kind: this.net.active ? 'online' : this.session.kind,
+      kind: this.session.kind === 'rank' ? 'rank' : this.net.active ? 'online' : this.session.kind,
       mode: this.mode.key,
+      rankMode: this.session.kind === 'rank' ? this.session.rank : '',
       rank,
       field: this.racers.length,
       finished: p.finished,
       time: p.finished ? p.finishTime : this.raceTime,
       difficulty: this.rules.difficulty ?? 1,
       score: this.mode.score[p.idx] || 0,
+      track: this.trackDef ? this.trackDef.id : '',
+      length: this.trackDef ? this.trackDef.length : 0,
       teamWin,
       pb: !!this.ttPB,
       medal: this.ttMedal || 0,
@@ -717,6 +745,7 @@ class Game {
     this.sfx.init();
     this.ui.showMenu(false);
     this.ui.showMatch(false);
+    this.ui.setQueue(false);
     this.ui.hideResults();
     this.ui.showPause(false);
     this.paused = false;
@@ -725,7 +754,7 @@ class Game {
     if (newCourse) this.buildWorld();
     else this.clearRace();
     const online = this.net.active;
-    this.mode = makeMode(online ? 'race' : this.rules.mode, this);
+    this.mode = makeMode(MODES[this.rules.mode] ? this.rules.mode : 'race', this);
     const xs = [-2.2, 2.2, -6.6, 6.6];
     for (let i = 0; i < roster.length; i++) {
       const e = roster[i];
@@ -797,6 +826,32 @@ class Game {
     if (b && !online) this.sfx.silenceRide();
   }
 
+  // 告诉服务器这页还开着。在线人数决定匹配等多久再补机器人。
+  beatPresence() {
+    let id = '';
+    try {
+      id = sessionStorage.getItem('huaxue_pid') || '';
+      if (!id) {
+        id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        sessionStorage.setItem('huaxue_pid', id);
+      }
+    } catch {
+      id = 'local';
+    }
+    const beat = () => {
+      fetch('/api/presence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+        .then((r) => r.json())
+        .then((d) => this.ui.setOnline(d))
+        .catch(() => {});
+    };
+    beat();
+    setInterval(beat, 8000);
+  }
+
   // ---------- 联机匹配 ----------
   setName(name) {
     this.playerName = String(name).trim().slice(0, 12);
@@ -804,22 +859,121 @@ class Game {
   }
 
   startMatch() {
-    if (this.netMode || this.state !== 'menu') return;
+    if (this.state !== 'menu') return;
+    if (this.netMode) {
+      if (!this.customRoom) this.leavePublicQueue();
+      return;
+    }
+    // 按首页玩法卡选的玩法分开匹配；计时赛是一个人滑，直接开
+    const mode = this.soloRules.mode;
+    if (mode === 'tt') {
+      this.startTournament();
+      return;
+    }
+    this.session = { kind: 'online', mode, track: this.soloRules.track };
+    this.rankMode = '';
     this.sfx.init();
     this.netMode = true;
+    this.customRoom = false;
     this.matchPlayers = null;
-    this.ui.showMenu(false);
-    this.ui.showMatch(true);
-    this.ui.setMatch({ status: '正在连接服务器…' });
-    this.net.match(this.playerName, this.look);
+    this.ui.showMatch(false);
+    this.ui.setQueue(true);
+    this.net.match(this.playerName, this.look, mode);
+  }
+
+  // 公开匹配只停在首页按钮上，离开首页或再点一次都退出队列
+  leavePublicQueue() {
+    if (!this.netMode || this.customRoom) return;
+    this.net.leave();
+    this.netMode = false;
+    this.matchPlayers = null;
+    this.ui.setQueue(false);
+    if (this.state === 'menu') this.buildLobby();
   }
 
   cancelMatch() {
+    if (this.customRoom && this.state === 'menu') {
+      this.customRoom = false;
+      this.netMode = false;
+      this.matchPlayers = null;
+      this.net.phase = 'watch';
+      this.net.sendJson({ t: 'leave' });
+      this.net.sendJson({ t: 'watch' });
+      this.ui.showMatch(false);
+      this.ui.showMenu(true);
+      this.ui.racePick = 'hall';
+      this.ui.renderTab('race');
+      return;
+    }
+    if (this.state === 'menu') {
+      this.leavePublicQueue();
+      return;
+    }
     this.toMenu();
   }
 
   startMatchNow() {
     this.net.sendJson({ t: 'startnow' });
+  }
+
+  // 房间列表。只连上看列表，不进匹配队列。
+  openHall() {
+    if (this.state !== 'menu') return;
+    if (this.netMode && !this.customRoom) this.leavePublicQueue();
+    if (this.netMode) return;
+    this.customRoom = false;
+    this.ui.racePick = 'hall';
+    this.ui.fromRoom = false;
+    this.ui.renderTab('race');
+    this.net.watch();
+  }
+
+  listedRules() {
+    const r = this.soloRules;
+    return { mode: r.mode, track: r.track, theme: r.theme, length: r.length, difficulty: r.difficulty, seats: r.seats || 8 };
+  }
+
+  enterListed(msg) {
+    if (this.state !== 'menu') return;
+    this.sfx.init();
+    this.netMode = true;
+    this.customRoom = true;
+    this.matchPlayers = null;
+    this.ui.showMenu(false);
+    this.ui.showMatch(true);
+    this.ui.setMatch({ status: '正在进入房间…', kind: 'room' });
+    this.net.enter({ ...msg, name: this.playerName, look: this.look });
+  }
+
+  createListedRoom() {
+    if (this.soloRules.mode === 'tt') {
+      this.ui.toast('计时赛是一个人滑，换个玩法再开房', true);
+      return;
+    }
+    this.enterListed({ t: 'create', rules: this.listedRules() });
+  }
+
+  joinListed(id) {
+    this.enterListed({ t: 'join', id });
+  }
+
+  quickListed() {
+    const mode = this.ui.hallMode && this.ui.hallMode !== 'all' ? this.ui.hallMode : '';
+    this.enterListed({ t: 'quickroom', mode });
+  }
+
+  onNetLobby(m) {
+    this.ui.hallRooms = Array.isArray(m.rooms) ? m.rooms : [];
+    if (m.error) this.ui.toast(m.error, true);
+    if (m.error && this.customRoom && !this.matchPlayers) {
+      this.customRoom = false;
+      this.netMode = false;
+      this.net.phase = 'watch';
+      this.ui.showMatch(false);
+      this.ui.showMenu(true);
+      this.ui.racePick = 'hall';
+    }
+    if (this.ui.tab === 'race' && this.ui.racePick === 'hall') this.ui.renderTab('race');
   }
 
   // 房间里的人变了 / 倒计时变了
@@ -828,18 +982,37 @@ class Game {
     this.matchPlayers = m.players;
     this.matchEnd = performance.now() + (Number(m.left) || 0);
     this.buildLobby();
-    this.ui.setMatch({ players: m.players, me: this.net.id, host: m.host === this.net.id, max: m.max });
+    if (!this.customRoom) {
+      this.ui.tickQueue();
+      return;
+    }
+    this.ui.setMatch({ players: m.players, me: this.net.id, host: m.host === this.net.id, max: m.max, reason: m.reason || 'fill' });
   }
 
   // 服务器宣布开赛：所有人用同一个种子生成同一条赛道
   onNetStart(m) {
     if (!this.netMode) return;
     this.matchPlayers = null;
-    this.rules = { ...this.soloRules, ...m.rules, rounds: 1, mode: 'race', track: 'random', banned: Array.isArray(m.rules && m.rules.banned) ? m.rules.banned : [] };
+    const mode = MODES[m.rules && m.rules.mode] ? m.rules.mode : 'race';
+    if (m.rules && m.rules.rank && RANK_MAP[m.rules.rank]) {
+      this.session = { kind: 'rank', mode, rank: m.rules.rank, track: m.track || 'random' };
+      this.rankMode = m.rules.rank;
+    } else {
+      this.session = { kind: 'online', mode, track: m.track || 'random' };
+      this.rankMode = '';
+    }
+    this.rules = { ...this.soloRules, ...m.rules, rounds: 1, mode, track: m.track || 'random', banned: Array.isArray(m.rules && m.rules.banned) ? m.rules.banned : [] };
     if (!LENGTHS[this.rules.length]) this.rules.length = 'medium';
-    this.seed = m.seed | 0;
-    this.trackDef = null;
-    this.themeKey = THEMES[m.theme] ? m.theme : 'day';
+    const fixed = m.track && TRACK_MAP[m.track];
+    if (fixed) {
+      this.trackDef = fixed;
+      this.seed = fixed.seed;
+      this.themeKey = fixed.theme;
+    } else {
+      this.trackDef = null;
+      this.seed = m.seed | 0;
+      this.themeKey = THEMES[m.theme] ? m.theme : 'day';
+    }
     this.round = 1;
     this.beginRace(true, m.roster, m.you | 0);
     // 各人机器快慢不一样，等所有人都加载完再一起倒计时
@@ -875,9 +1048,20 @@ class Game {
 
   // 断线
   onNetLost(was) {
+    if (was === 'watch' && !this.netMode) {
+      this.ui.toast('房间列表断开了', true);
+      return;
+    }
     if (!this.netMode) return;
+    if (this.state === 'menu' && !this.customRoom) {
+      this.netMode = false;
+      this.matchPlayers = null;
+      this.ui.setQueue(false);
+      this.buildLobby();
+      this.ui.toast(was === 'connecting' ? '连接不上匹配服务器，请确认服务器已启动' : '匹配断开了', true);
+      return;
+    }
     if (this.state === 'menu') {
-      // 还在匹配：留在匹配面板上，告诉玩家怎么回事
       this.matchPlayers = null;
       this.buildLobby();
       this.ui.setMatch({ status: was === 'connecting' ? '连接不上匹配服务器，请确认服务器已启动' : '与服务器的连接断开了', error: true });
@@ -938,14 +1122,23 @@ class Game {
     // 奖励只结算一次（名单还会刷新好几回）
     if (!this.rewarded) {
       this.rewarded = true;
-      this.netReward = this.profile.applyRace(this.playerReport(p.rank));
+      let teamWin = false;
+      if (this.mode.key === 'team' && this.player) teamWin = this.mode.winner(this.order) === this.player.team;
+      this.netReward = this.profile.applyRace(this.playerReport(p.rank, teamWin));
       this.ui.refreshProfile();
     }
+    const rankSpec = this.session.kind === 'rank' ? RANK_MAP[this.session.rank] : null;
+    let title = `第 ${p.rank} 名${p.rank === 1 ? ' 🏆' : ''}`;
+    if (rankSpec) {
+      const teamWin = this.mode.key === 'team' && this.mode.winner(this.order) === p.team;
+      const won = this.mode.key === 'team' ? teamWin : p.finished && p.rank <= 3;
+      title = `${won ? '胜利' : '失败'} · ${rankSpec.name}`;
+    }
     this.ui.showResults({
-      title: `第 ${p.rank} 名${p.rank === 1 ? ' 🏆' : ''}`,
-      sub: `联机 · ${this.theme.name} · 用时 ${fmtTime(p.finishTime)} · 你击中对手 ${this.playerHits} 次，被击飞 ${p.hits} 次${racing ? ' · 还有人没冲线' : ''}`,
+      title,
+      sub: `${rankSpec ? rankSpec.name + ' · ' : '联机 · '}${this.theme.name} · 用时 ${fmtTime(p.finishTime)} · 你击中对手 ${this.playerHits} 次，被击飞 ${p.hits} 次${racing ? ' · 还有人没冲线' : ''}`,
       rows,
-      nextLabel: '继续匹配 ▶',
+      nextLabel: rankSpec ? '继续排位 ▶' : '继续匹配 ▶',
       reward: this.netReward,
     });
   }
@@ -964,10 +1157,9 @@ class Game {
     const p = this.player;
     const stand = mode.standings(this.order);
     const myRank = stand.indexOf(p) + 1;
-    const cup = s.kind === 'cup' ? CUP_MAP[s.cup] : null;
     const multi = s.kind === 'quick' && this.rules.rounds > 1;
-    const pointsMode = multi || !!cup;
-    const last = cup ? s.raceIdx >= 2 : multi && this.round >= this.rules.rounds;
+    const pointsMode = multi;
+    const last = multi && this.round >= this.rules.rounds;
     const timeOf = (r) => (r.finished ? fmtTime(r.finishTime) : r.out ? '淘汰' : '未完赛');
     let rows = stand.map((r, i) => {
       const row = { rank: i + 1, name: r.name, me: r.isPlayer, time: timeOf(r), team: r.team };
@@ -995,29 +1187,23 @@ class Game {
       sub = `${mode.def.name} · ${where} · 你的得分 ${mode.score[p.idx]} · ${how}`;
     }
     if (multi) sub = `锦标赛 第 ${this.round} / ${this.rules.rounds} 轮 · ` + sub;
-    if (cup) sub = `${cup.name} 第 ${s.raceIdx + 1} / 3 站 · ` + sub;
     const extra = [];
     let nextLabel = '再来一局 ▶';
+    const rankSpec = s.kind === 'rank' ? RANK_MAP[s.rank] : null;
+    if (rankSpec) {
+      const won = mode.key === 'team' ? teamWin : p.finished && myRank <= 3;
+      title = `${won ? '胜利' : '失败'} · ${rankSpec.name}`;
+      if (mode.key !== 'team') title += ` · 第 ${myRank} 名`;
+      nextLabel = '继续排位 ▶';
+    }
     if (last) {
       const tot = this.racers.slice().sort((a, b) => this.points[b.idx] - this.points[a.idx]);
       const mr = tot.indexOf(p) + 1;
       rows = tot.map((r, i) => ({ rank: i + 1, name: r.name, me: r.isPlayer, time: '', pts: `${this.points[r.idx]} 分` }));
-      if (cup) {
-        const trophy = mr <= 3 ? 4 - mr : 0;
-        title = trophy ? `${TROPHY[trophy]} ${cup.name} ${TROPHY_NAME[trophy]}！` : `${cup.name} 总排名第 ${mr} 名`;
-        sub = `总积分 ${this.points[p.idx]} 分 · 冠军：${tot[0].name}${trophy ? '' : ' · 总排名前三才能拿到奖杯'}`;
-        if (trophy) {
-          const cr = this.profile.cupResult(cup, trophy);
-          extra.push({ label: `${cup.name} ${TROPHY_NAME[trophy]}${cr.first ? '（新纪录）' : ''}`, xp: cr.xp, coins: cr.coins });
-        }
-        nextLabel = '返回赛事 ▶';
-      } else {
-        title = `锦标赛总排名 第 ${mr} 名${mr === 1 ? ' 🏆' : ''}`;
-        sub = `冠军：${tot[0].name}（${this.points[tot[0].idx]} 分）`;
-        nextLabel = '再来一届 ▶';
-      }
-    } else if (cup) nextLabel = `下一站：${TRACK_MAP[cup.tracks[s.raceIdx + 1]].name} ▶`;
-    else if (multi) nextLabel = '下一轮 ▶';
+      title = `锦标赛总排名 第 ${mr} 名${mr === 1 ? ' 🏆' : ''}`;
+      sub = `冠军：${tot[0].name}（${this.points[tot[0].idx]} 分）`;
+      nextLabel = '再来一届 ▶';
+    } else if (multi) nextLabel = '下一轮 ▶';
 
     if (mode.key === 'tt' && p.finished) {
       const t = p.finishTime;
@@ -1046,17 +1232,6 @@ class Game {
       nextLabel = '再跑一趟 ▶';
     }
 
-    if (s.kind === 'challenge') {
-      const ch = CHALLENGE_MAP[s.chal];
-      const rep = this.playerReport(myRank, teamWin);
-      const ok = ch.test(rep);
-      const cr = this.profile.challengeResult(ch, ok);
-      if (cr) extra.push({ label: `挑战「${ch.name}」${cr.first ? '首次完成' : '再次完成'}`, xp: cr.xp, coins: cr.coins });
-      title = ok ? `✅ 挑战成功：${ch.name}` : `❌ 挑战失败：${ch.name}`;
-      sub = `${ch.desc} · ${ch.prog(rep)}`;
-      nextLabel = ok ? '再挑战一次 ▶' : '重新挑战 ▶';
-    }
-
     let reward = null;
     if (!this.rewarded) {
       this.rewarded = true;
@@ -1065,7 +1240,7 @@ class Game {
       reward = this.profile.applyRace(rep);
       this.ui.refreshProfile();
     }
-    this.ui.showResults({ title, sub, rows, nextLabel, reward, backLabel: cup || s.kind === 'challenge' ? '返回赛事' : '返回大厅' });
+    this.ui.showResults({ title, sub, rows, nextLabel, reward, backLabel: '返回大厅' });
   }
 
   // ---------- 回调 ----------
@@ -1552,7 +1727,10 @@ class Game {
     cam.position.y = Math.max(cam.position.y, this.course.height(cam.position.x, cam.position.z) + 1.5);
     cam.lookAt(ax, ay, g.z);
     this.focusShadow(g);
-    if (this.netMode && this.matchPlayers) this.ui.tickMatch(this.matchEnd - performance.now());
+    if (this.netMode && this.state === 'menu') {
+      if (!this.customRoom) this.ui.tickQueue();
+      else if (this.matchPlayers) this.ui.tickMatch(this.matchEnd - performance.now());
+    }
   }
 
   updateCountdown(dt) {

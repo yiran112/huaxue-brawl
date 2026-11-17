@@ -118,6 +118,11 @@ class TeamMode extends BaseMode {
   }
 
   winner(order) {
+    if (this.game.rules.teamFirst) {
+      const fin = order.find((r) => r.finished);
+      if (fin && fin.team >= 0) return fin.team;
+      return order[0] && order[0].team >= 0 ? order[0].team : 0;
+    }
     const p = this.points(order);
     if (p[0] !== p[1]) return p[0] > p[1] ? 0 : 1;
     return order[0] ? order[0].team : 0;
@@ -128,6 +133,9 @@ class TeamMode extends BaseMode {
   }
 
   hud() {
+    if (this.game.rules.teamFirst) {
+      return `<span style="color:${TEAM_COLORS[0]}">红队</span> 对 <span style="color:${TEAM_COLORS[1]}">蓝队</span><br><small>先冲过终点的人所在队伍获胜</small>`;
+    }
     const p = this.points(this.game.order);
     return `<span style="color:${TEAM_COLORS[0]}">红队 <b>${p[0]}</b></span> : <span style="color:${TEAM_COLORS[1]}"><b>${p[1]}</b> 蓝队</span><br><small>按名次 ${POINTS.join('/')} 给全队计分</small>`;
   }

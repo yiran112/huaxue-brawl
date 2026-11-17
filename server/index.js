@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attachMatchServer } from './match.js';
+import { createAccount } from './account.js';
+import { createPresence, handleOnlineRequest } from './presence.js';
 
 const PORT = Number(process.env.PORT) || 8787;
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist');
@@ -24,6 +26,9 @@ const MIME = {
 };
 
 let match = null;
+const account = createAccount();
+const presence = createPresence();
+const onlineCount = () => Math.max(presence.count(), match ? match.stats().online : 0, 1);
 
 const server = http.createServer((req, res) => {
   let pathname = '/';
@@ -31,6 +36,22 @@ const server = http.createServer((req, res) => {
     pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
   } catch {
     res.writeHead(400).end('Bad request');
+    return;
+  }
+  if (pathname === '/api/online' || pathname === '/api/presence') {
+    handleOnlineRequest(req, res, presence, onlineCount).catch((err) => {
+      console.error(err);
+      if (!res.headersSent) res.writeHead(500).end();
+    });
+    return;
+  }
+  if (pathname.startsWith('/api/')) {
+    account.handle(req, res).catch((err) => {
+      console.error(err);
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' }).end('{"error":"服务器出错了"}');
+      }
+    });
     return;
   }
   if (pathname === '/health') {
@@ -60,7 +81,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-match = attachMatchServer(server, { exclusive: true, log: console.log });
+match = attachMatchServer(server, { exclusive: true, log: console.log, online: onlineCount });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`雪山大乱斗 联机服务器已启动：http://localhost:${PORT}`);

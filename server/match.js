@@ -2,17 +2,45 @@
 // 不跑任何游戏逻辑，所以既能挂在 Vite 开发服务器上（见 vite.config.js），
 // 也能挂在独立的 Node 服务器上（见 server/index.js）。
 import { WebSocketServer } from 'ws';
-import { THEME_KEYS, LOOK_PRESETS, BOT_NAMES } from '../src/config.js';
+import { THEME_KEYS, LOOK_PRESETS, BOT_NAMES, MODE_KEYS, LENGTHS } from '../src/config.js';
 import { GEAR_KEYS, GOGGLES, BACKS, SCARVES, TRAILS, pickBotGear } from '../src/gear.js';
+import { TRACK_MAP } from '../src/tracks.js';
+import { botWaitMs } from '../src/wait.js';
 
 const MAX_PLAYERS = 8;
-const WAIT_MS = 20000; // 房间建好后最多等这么久就开赛
-const JOIN_GRACE_MS = 5000; // 有人进来后，至少再等这么久
+// 排位和首页匹配分开排队。人数和判胜方式跟玩法走。
+const RANK_RULES = {
+  'rank-solo': { mode: 'speed', seats: 6, items: false, itemRate: 1, teamFirst: false, rank: 'solo' },
+  'rank-team': { mode: 'team', seats: 6, items: false, itemRate: 1, teamFirst: false, rank: 'team' },
+  'rank-item': { mode: 'team', seats: 6, items: true, itemRate: 1, teamFirst: true, rank: 'item' },
+};
+const JOIN_GRACE_MS = 5000; // 有人进来、而且剩下的时间比这还短时，再留这么久
 const FULL_MS = 3000; // 满员 / 房主点“立即开始”后的倒计时
 const LOAD_TIMEOUT_MS = 15000; // 等所有人加载赛道，超时就不等了
 const DROP_BACKLOG = 256 * 1024; // 对方积压超过这么多字节，就丢掉位置包（下一包会补上）
-// 匹配赛的统一规则
-const MATCH_RULES = { length: 'medium', items: true, itemRate: 1, wildlife: true, difficulty: 1, rounds: 1, banned: [] };
+// 匹配赛的统一规则；玩法由玩家在首页选，每种玩法各排各的队
+const MATCH_RULES = { mode: 'race', length: 'medium', items: true, itemRate: 1, wildlife: true, difficulty: 1, rounds: 1, banned: [], track: 'random', theme: 'random' };
+const ITEM_MODES = ['race', 'elim', 'team', 'brawl'];
+// 计时赛是一个人滑，客户端不会拿它来匹配；万一发来了按道具赛排
+const matchMode = (m) => (MODE_KEYS.includes(m) && m !== 'tt' ? m : 'race');
+function matchRules(mode) {
+  return { ...MATCH_RULES, mode, items: ITEM_MODES.includes(mode), itemRate: mode === 'brawl' ? 3 : 1 };
+}
+
+// 开房间：玩法、赛道和人数由房主定。计时赛是一个人滑，不进房间列表。
+function cleanRoomRules(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  let mode = MODE_KEYS.includes(r.mode) && r.mode !== 'tt' ? r.mode : 'race';
+  let seats = [4, 6, 8].includes(Number(r.seats)) ? Number(r.seats) : 8;
+  if (mode === 'team') seats = 8;
+  if (mode === 'elim') seats = Math.max(4, seats);
+  const track = r.track && r.track !== 'random' && TRACK_MAP[r.track] ? r.track : 'random';
+  const theme = r.theme === 'random' || THEME_KEYS.includes(r.theme) ? r.theme : 'day';
+  const length = LENGTHS[r.length] ? r.length : 'medium';
+  const difficulty = int(r.difficulty, 0, 2, 1);
+  const items = mode === 'race' || mode === 'elim' || mode === 'team' || mode === 'brawl';
+  return { mode, track, theme, length, difficulty, seats, items, itemRate: mode === 'brawl' ? 3 : 1, wildlife: true, rounds: 1, banned: [] };
+}
 
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 function shuffle(list) {
@@ -68,11 +96,11 @@ function cleanName(name, id) {
 }
 
 // exclusive：这台 HTTP 服务器上只有我们一个 WebSocket 服务，其他路径的升级请求直接拒绝
-export function attachMatchServer(httpServer, { path = '/ws', exclusive = false, log = () => {} } = {}) {
+export function attachMatchServer(httpServer, { path = '/ws', exclusive = false, log = () => {}, online = null } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
   const clients = new Set();
   const rooms = new Set();
-  let waiting = null; // 正在等人的那个房间
+  const waiting = new Map(); // 玩法 → 这个玩法正在等人的那个匹配房间
   let nextId = 1;
   let nextRoom = 1;
 
@@ -85,8 +113,11 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
       t: 'room',
       players: room.members.map((m) => ({ id: m.id, name: m.name, look: m.look })),
       host: room.host.id,
-      max: MAX_PLAYERS,
+      max: room.rules && room.rules.seats ? room.rules.seats : MAX_PLAYERS,
       left: Math.max(0, room.startAt - Date.now()),
+      reason: room.reason || 'fill',
+      kind: room.kind || 'match',
+      mode: room.rules ? room.rules.mode : 'race',
     };
     for (const m of room.members) send(m, info);
   };
@@ -100,18 +131,59 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
     clearTimeout(room.timer);
     clearTimeout(room.loadTimer);
     rooms.delete(room);
-    if (waiting === room) waiting = null;
+    if (room.mode && waiting.get(room.mode) === room) waiting.delete(room.mode);
+    if (room.kind === 'custom') pushLobby();
   };
+
+  const roomCard = (room) => ({
+    id: room.id,
+    mode: room.rules.mode,
+    track: room.rules.track,
+    theme: room.rules.theme,
+    host: room.host ? room.host.name : '',
+    players: room.members.length,
+    max: room.rules.seats,
+  });
+
+  function pushLobby(extra) {
+    const msg = { t: 'lobby', rooms: [...rooms].filter((r) => r.kind === 'custom' && r.state === 'waiting').map(roomCard), ...extra };
+    for (const c of clients) if (c.listing && !c.room) send(c, msg);
+  }
+
+  function admit(c, room, msg) {
+    c.look = cleanLook(msg.look);
+    c.listing = false;
+    const base = cleanName(msg.name, c.id);
+    let name = base;
+    for (let n = 2; room.members.some((m) => m.name === name); n++) name = `${base}${n}`;
+    c.name = name;
+    c.ready = false;
+    c.room = room;
+    room.members.push(c);
+    if (!room.host) room.host = c;
+  }
 
   function queue(c, msg) {
     if (c.room) return;
     c.look = cleanLook(msg.look);
     const base = cleanName(msg.name, c.id);
-    if (!waiting) {
-      waiting = { id: nextRoom++, state: 'waiting', members: [], host: c, startAt: Date.now() + WAIT_MS, timer: null, loadTimer: null };
-      rooms.add(waiting);
+    const onlineNow = () => {
+      const n = online ? online() : clients.size;
+      return Math.max(1, Math.floor(Number(n) || 1));
+    };
+    const rankId = typeof msg.rank === 'string' && RANK_RULES[msg.rank] ? msg.rank : '';
+    const mode = rankId || matchMode(msg.mode);
+    const rules = rankId ? { ...MATCH_RULES, ...RANK_RULES[rankId] } : matchRules(mode);
+    const cap = rules.seats || MAX_PLAYERS;
+    let room = waiting.get(mode);
+    if (!room) {
+      // 等人多久看当前在线：人少 10 秒就补机器人，人多最多等 30 秒
+      const wait = botWaitMs(onlineNow());
+      room = { id: nextRoom++, mode, rules, state: 'waiting', members: [], host: c, startAt: Date.now() + wait, reason: 'fill', timer: null, loadTimer: null };
+      waiting.set(mode, room);
+      rooms.add(room);
+      log(`[match] 新建 ${mode} 房间 #${room.id}，在线 ${onlineNow()} 人，${Math.round(wait / 1000)} 秒后补机器人`);
     }
-    const room = waiting;
     // 同一个房间里不重名
     let name = base;
     for (let n = 2; room.members.some((m) => m.name === name); n++) name = `${base}${n}`;
@@ -120,24 +192,72 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
     c.room = room;
     room.members.push(c);
     const now = Date.now();
-    if (room.members.length >= MAX_PLAYERS) {
+    if (room.members.length >= cap) {
       room.startAt = Math.min(room.startAt, now + FULL_MS);
-      waiting = null; // 满了，后面来的人进新房间
+      room.reason = 'full';
+      waiting.delete(mode); // 满了，后面来的人进新房间
     } else if (room.members.length > 1) {
       room.startAt = Math.max(room.startAt, now + JOIN_GRACE_MS);
+      room.reason = 'fill';
     }
     arm(room);
     pushRoom(room);
-    log(`[match] ${c.name} 进入房间 #${room.id}（${room.members.length}/${MAX_PLAYERS}）`);
+    log(`[match] ${c.name} 进入房间 #${room.id}（${room.members.length}/${cap}）`);
+  }
+
+  // 自己开一间，停在列表里，等别人进来。房主点开始才开赛。
+  function createCustom(c, msg) {
+    if (c.room) return;
+    const rules = cleanRoomRules(msg.rules);
+    const room = { id: nextRoom++, kind: 'custom', state: 'waiting', members: [], host: null, rules, startAt: 0, reason: 'host', timer: null, loadTimer: null };
+    rooms.add(room);
+    admit(c, room, msg);
+    room.host = c;
+    pushRoom(room);
+    pushLobby();
+    log(`[room] ${c.name} 创建房间 #${room.id}（${rules.mode} / ${rules.track} / ${rules.seats} 人）`);
+  }
+
+  function joinCustom(c, msg) {
+    if (c.room) return;
+    const room = [...rooms].find((r) => r.kind === 'custom' && r.state === 'waiting' && r.id === Math.floor(Number(msg.id)));
+    if (!room || room.members.length >= room.rules.seats) {
+      c.listing = true;
+      send(c, { t: 'lobby', rooms: [...rooms].filter((r) => r.kind === 'custom' && r.state === 'waiting').map(roomCard), error: '这个房间已经满了或开赛了' });
+      return;
+    }
+    admit(c, room, msg);
+    pushRoom(room);
+    pushLobby();
+    log(`[room] ${c.name} 加入房间 #${room.id}（${room.members.length}/${room.rules.seats}）`);
+  }
+
+  function quickCustom(c, msg) {
+    if (c.room) return;
+    const mode = MODE_KEYS.includes(msg.mode) ? msg.mode : '';
+    const room = [...rooms].find((r) => r.kind === 'custom' && r.state === 'waiting' && r.members.length < r.rules.seats && (!mode || r.rules.mode === mode));
+    if (!room) {
+      c.listing = true;
+      send(c, { t: 'lobby', rooms: [...rooms].filter((r) => r.kind === 'custom' && r.state === 'waiting').map(roomCard), error: '现在没有可进的房间' });
+      return;
+    }
+    admit(c, room, msg);
+    pushRoom(room);
+    pushLobby();
+    log(`[room] ${c.name} 快速进入房间 #${room.id}`);
   }
 
   function startRoom(room) {
     if (room.state !== 'waiting') return;
-    if (waiting === room) waiting = null;
+    if (room.mode && waiting.get(room.mode) === room) waiting.delete(room.mode);
     if (!room.members.length) return closeRoom(room);
     room.state = 'loading';
-    const seed = (Math.random() * 1e9) | 0;
-    const theme = pick(THEME_KEYS);
+    const custom = room.kind === 'custom' ? room.rules : null;
+    const seats = (room.rules && room.rules.seats) || MAX_PLAYERS;
+    const fixed = custom && custom.track !== 'random' ? TRACK_MAP[custom.track] : null;
+    const seed = fixed ? fixed.seed : (Math.random() * 1e9) | 0;
+    const theme = fixed ? fixed.theme : custom && custom.theme !== 'random' ? custom.theme : pick(THEME_KEYS);
+    const rules = room.rules || MATCH_RULES;
     // 真人随机排发车位，空位由机器人补齐
     const humans = shuffle(room.members.slice());
     const taken = new Set(humans.map((m) => m.name));
@@ -148,12 +268,13 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
       m.ready = false;
       roster.push({ idx: i, id: m.id, name: m.name, look: m.look, bot: false });
     });
-    for (let i = humans.length, k = 0; i < MAX_PLAYERS; i++, k++) {
+    for (let i = humans.length, k = 0; i < seats; i++, k++) {
       roster.push({ idx: i, id: 0, name: botNames[k % botNames.length], look: botLook(k), bot: true });
     }
-    for (const m of room.members) send(m, { t: 'start', seed, theme, rules: MATCH_RULES, roster, host: room.host.id, you: m.idx });
+    for (const m of room.members) send(m, { t: 'start', seed, theme, track: fixed ? fixed.id : 'random', rules, roster, host: room.host.id, you: m.idx });
     room.loadTimer = setTimeout(() => go(room), LOAD_TIMEOUT_MS);
-    log(`[match] 房间 #${room.id} 开赛：${humans.length} 人 + ${MAX_PLAYERS - humans.length} 个机器人`);
+    pushLobby();
+    log(`[match] 房间 #${room.id} 开赛：${humans.length} 人 + ${seats - humans.length} 个机器人`);
   }
 
   // 所有人都加载完赛道了：一起开始倒计时
@@ -173,7 +294,10 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
     if (!room.members.length) return closeRoom(room);
     if (room.host === c) room.host = room.members[0];
     if (room.state === 'waiting') {
+      const cap = (room.rules && room.rules.seats) || MAX_PLAYERS;
+      if (room.kind !== 'custom' && room.members.length < cap && room.reason === 'full') room.reason = 'fill';
       pushRoom(room);
+      if (room.kind === 'custom') pushLobby();
     } else {
       // 比赛中有人走了：告诉其他人，顺带通知新的房主是谁（机器人归房主管）
       for (const m of room.members) send(m, { t: 'leave', id: c.id, host: room.host.id });
@@ -192,16 +316,39 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
     const room = c.room;
     switch (msg.t) {
       case 'queue':
+        c.listing = false;
         queue(c, msg);
+        break;
+      case 'watch':
+        if (c.room) break;
+        c.listing = true;
+        send(c, { t: 'lobby', rooms: [...rooms].filter((r) => r.kind === 'custom' && r.state === 'waiting').map(roomCard) });
+        break;
+      case 'create':
+        createCustom(c, msg);
+        break;
+      case 'join':
+        joinCustom(c, msg);
+        break;
+      case 'quickroom':
+        quickCustom(c, msg);
         break;
       case 'leave':
         leave(c);
         break;
       case 'startnow':
         if (room && room.state === 'waiting' && room.host === c) {
-          room.startAt = Math.min(room.startAt, Date.now() + FULL_MS);
-          arm(room);
-          pushRoom(room);
+          if (room.kind === 'custom') {
+            room.startAt = Date.now() + FULL_MS;
+            room.reason = 'now';
+            arm(room);
+            pushRoom(room);
+          } else {
+            room.startAt = Math.min(room.startAt, Date.now() + FULL_MS);
+            room.reason = 'now';
+            arm(room);
+            pushRoom(room);
+          }
         }
         break;
       case 'ready':
