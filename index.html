@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>雪山大乱斗 - 一边滑雪一边打架</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1530; color: #fff;
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif; user-select: none; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .hidden { display: none !important; }
+  .stroke { text-shadow: -2px -2px 0 #0b1530, 2px -2px 0 #0b1530, -2px 2px 0 #0b1530, 2px 2px 0 #0b1530, 0 4px 0 #0b1530; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  #pos { position: absolute; left: 28px; top: 18px; font-weight: 900; font-style: italic; line-height: 1; }
+  #posNum { font-size: 92px; color: #ffd23c; }
+  #posTotal { font-size: 34px; margin-left: 4px; }
+  #timer { position: absolute; left: 32px; top: 118px; font-size: 26px; font-weight: 900; font-variant-numeric: tabular-nums; }
+  #round { position: absolute; left: 32px; top: 152px; font-size: 16px; font-weight: 700; opacity: .9; }
+  #speed { position: absolute; right: 30px; bottom: 24px; font-size: 20px; font-weight: 900; font-style: italic; text-align: right; }
+  #speed b { font-size: 60px; font-variant-numeric: tabular-nums; }
+  #side { position: absolute; right: 22px; top: 20px; width: 190px; }
+  #rank { font-size: 15px; font-weight: 700; }
+  #rank .row { display: flex; align-items: center; gap: 8px; padding: 3px 10px; margin-bottom: 3px; border-radius: 8px;
+    background: rgba(11, 21, 48, .55); }
+  #rank .row.me { background: #ffd23c; color: #0b1530; }
+  #rank .row.done { opacity: .75; }
+  #rank .row.out { opacity: .4; text-decoration: line-through; }
+  #modeBox { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(11, 21, 48, .62); font-size: 14px; font-weight: 700; line-height: 1.5; }
+  #modeBox b { color: #ffd23c; font-size: 17px; }
+  #modeBox small { font-size: 11px; opacity: .75; font-weight: 700; }
+  #trickPop { position: absolute; left: 0; right: 0; top: 60%; text-align: center; font-size: 30px; font-weight: 900; font-style: italic;
+    color: #ffe066; opacity: 0; }
+  #trickPop small { display: block; font-size: 20px; color: #ff7ad0; }
+  #trickPop.show { animation: trickUp 1.3s ease-out forwards; }
+  @keyframes trickUp { 0% { opacity: 0; transform: translateY(14px) scale(1.3); } 12% { opacity: 1; transform: none; } 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(-30px); } }
+  #rank .n { width: 18px; font-style: italic; font-weight: 900; }
+  #rank .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #progress { position: absolute; left: 34px; top: 200px; bottom: 150px; width: 8px; border-radius: 4px; background: rgba(11, 21, 48, .55); }
+  #progress::before { content: "起"; position: absolute; top: -24px; left: -6px; font-size: 14px; font-weight: 900; }
+  #progress::after { content: "🏁"; position: absolute; bottom: -26px; left: -7px; font-size: 16px; }
+  #progress .dot { position: absolute; left: -4px; width: 16px; height: 16px; margin-top: -8px; border-radius: 50%;
+    border: 2px solid #0b1530; }
+  #progress .dot.me { left: -7px; width: 22px; height: 22px; margin-top: -11px; border-color: #fff; z-index: 2; }
+  #pos, #timer, #round, #progress { z-index: 4; }
+  /* 自己的道具命中别人时，左上角回放对方所在区域 */
+  #impact { position: absolute; left: 56px; top: 176px; width: min(400px, 32vw); height: min(220px, 34vh);
+    border: 3px solid #ff2d3a; border-radius: 10px; z-index: 1;
+    box-shadow: 0 0 0 1px rgba(11, 21, 48, .85), 0 10px 24px rgba(0, 0, 0, .28); }
+  #impactBar { position: absolute; right: 8px; bottom: 8px; display: flex; align-items: center; gap: 8px;
+    max-width: calc(100% - 16px); padding: 4px 10px; border-radius: 8px; background: rgba(11, 21, 48, .78);
+    font-size: 15px; font-weight: 900; }
+  #impactLive { color: #ff5a6a; font-size: 12px; letter-spacing: 1px; }
+  #impactWho { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #impactCause { color: #ffd23c; white-space: nowrap; }
+  #item { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); text-align: center; }
+  #itemSlot { width: 96px; height: 96px; margin: 0 auto; border-radius: 24px; border: 5px solid #fff; background: rgba(11, 21, 48, .6);
+    display: flex; align-items: center; justify-content: center; font-size: 54px; position: relative; transition: transform .12s; }
+  #itemSlot.has { border-color: #ffd23c; background: rgba(60, 40, 120, .7); transform: scale(1.06); }
+  #itemAmmo { position: absolute; right: -10px; top: -10px; min-width: 30px; height: 30px; border-radius: 15px; background: #ff3d6e;
+    font-size: 17px; font-weight: 900; line-height: 30px; padding: 0 6px; }
+  #itemName { margin-top: 6px; font-size: 18px; font-weight: 900; height: 24px; }
+  #itemKey { font-size: 13px; opacity: .85; font-weight: 700; }
+  #feed { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); width: 420px; text-align: center; font-size: 15px; font-weight: 700; }
+  #feed div { display: inline-block; margin-bottom: 4px; padding: 3px 12px; border-radius: 12px; background: rgba(11, 21, 48, .6);
+    animation: feedIn .2s ease-out; }
+  #feed div b { color: #ffd23c; }
+  #feed div i { color: #ff7a9a; font-style: normal; }
+  @keyframes feedIn { from { transform: translateY(-8px); opacity: 0; } }
+  #banner { position: absolute; left: 0; right: 0; top: 24%; text-align: center; font-size: 44px; font-weight: 900; font-style: italic;
+    opacity: 0; transition: opacity .25s; }
+  #banner.show { opacity: 1; animation: pop .3s ease-out; }
+  #banner.good { color: #8dff6a; } #banner.bad { color: #ff5a6a; } #banner.gold { color: #ffd23c; font-size: 76px; }
+  #banner.small { font-size: 46px; }
+  @keyframes pop { from { transform: scale(1.6); } }
+  #tip { position: absolute; left: 0; right: 0; bottom: 178px; text-align: center; font-size: 22px; font-weight: 900; opacity: 0; transition: opacity .25s; }
+  #tip.show { opacity: 1; }
+  #count { position: absolute; left: 0; right: 0; top: 30%; text-align: center; font-size: 170px; font-weight: 900; font-style: italic; color: #ffd23c; }
+  #count.pop { animation: pop .35s ease-out; }
+  #hint { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 12px; opacity: .6; }
+
+  /* ---------- 面板通用 ---------- */
+  .overlay { position: fixed; inset: 0; display: flex; }
+  .panel { background: rgba(11, 21, 48, .86); border: 3px solid rgba(255, 255, 255, .16); border-radius: 22px; backdrop-filter: blur(6px); }
+  button { font-family: inherit; cursor: pointer; border: 0; color: #fff; }
+  .btn { padding: 12px 22px; border-radius: 14px; font-size: 18px; font-weight: 900; background: #2f4a9c; box-shadow: 0 5px 0 #18265a;
+    transition: transform .08s, box-shadow .08s, filter .15s; }
+  .btn:hover { filter: brightness(1.15); }
+  .btn:active { transform: translateY(4px); box-shadow: 0 1px 0 #18265a; }
+  .btn.go { width: 100%; font-size: 28px; padding: 16px; background: #ff3d6e; box-shadow: 0 6px 0 #a11a3e; font-style: italic; }
+
+  /* ---------- 大厅：顶栏 + 左右两栏，中间留给缆车和开始按钮 ---------- */
+  #menu { --side: clamp(300px, 24vw, 420px); display: grid; grid-template-columns: var(--side) minmax(0, 1fr) var(--side);
+    grid-template-rows: auto minmax(0, 1fr); gap: 14px; padding: 14px 18px 16px;
+    background: linear-gradient(180deg, rgba(11, 21, 48, .4), rgba(11, 21, 48, 0) 26%, rgba(11, 21, 48, 0) 72%, rgba(11, 21, 48, .3)); }
+  #menuTop { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px 18px; padding: 8px 18px; }
+  #brand { flex: 1 1 0; min-width: 0; }
+  #title { font-size: clamp(28px, 2.5vw, 42px); font-weight: 900; font-style: italic; line-height: 1.1; color: #ffd23c; margin: 0; white-space: nowrap; }
+  #sub { margin-top: 3px; font-size: 13px; font-weight: 700; opacity: .85; white-space: nowrap; }
+  #profileWrap { flex: 1 1 0; min-width: 0; display: flex; justify-content: flex-end; }
+  #profileBar { display: flex; align-items: center; gap: 10px; width: min(100%, 340px); padding: 7px 12px; border-radius: 12px;
+    background: rgba(255, 255, 255, .08); font-size: 15px; font-weight: 900; white-space: nowrap; }
+  #profileBar .lv { color: #ffd23c; font-size: 18px; font-style: italic; }
+  #profileBar .ttl { padding: 1px 8px; border-radius: 8px; background: #ff3d6e; font-size: 12px; }
+  #profileBar .xpbar { flex: 1; }
+  #profileBar .xp { font-size: 12px; opacity: .8; font-variant-numeric: tabular-nums; }
+  #profileBar .coin { color: #9fe4ff; }
+  .xpbar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .14); overflow: hidden; }
+  .xpbar i { display: block; height: 100%; background: linear-gradient(90deg, #4fd2ff, #8dff6a); border-radius: 4px; }
+  .xpbar.big { height: 12px; border-radius: 6px; }
+  .tabs { flex: none; display: flex; gap: 6px; }
+  .tabs button { padding: 9px clamp(12px, 1.4vw, 22px); border-radius: 11px; font-size: 16px; font-weight: 900; white-space: nowrap;
+    background: rgba(255, 255, 255, .1); }
+  .tabs button.on { background: #ffd23c; color: #0b1530; }
+  /* 每一页拆成左右两栏：.tab 自己不占格子，两栏直接落进大厅的网格里 */
+  .tab { display: contents; }
+  .col { grid-row: 2; align-self: start; max-height: 100%; min-height: 0; display: flex; flex-direction: column; padding: 14px 8px 14px 16px; }
+  .col.l { grid-column: 1; }
+  .col.r { grid-column: 3; }
+  .colTitle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 0 8px 10px 0; font-size: 19px; font-weight: 900;
+    font-style: italic; color: #ffd23c; }
+  .colTitle small { font-size: 12px; font-style: normal; font-weight: 700; color: #fff; opacity: .7; }
+  .colBody { flex: 1; min-height: 0; overflow-y: auto; padding-right: 8px; }
+  .colBody > :last-child { margin-bottom: 0; }
+  .colBody::-webkit-scrollbar { width: 6px; } .colBody::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .25); border-radius: 3px; }
+  /* 中间一列：上面空出来看缆车，开始按钮贴底 */
+  #menuMid { grid-column: 2; grid-row: 2; position: relative; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end;
+    align-items: center; pointer-events: none; }
+  #menuToast { position: absolute; left: 50%; top: 0; z-index: 5; width: max-content; max-width: 100%; padding: 10px 18px; border-radius: 12px;
+    background: #2fae5a; font-size: 15px; font-weight: 900; text-align: center; opacity: 0; transition: opacity .2s, transform .2s;
+    transform: translate(-50%, -8px); }
+  #menuToast.bad { background: #d9384f; }
+  #menuToast.show { opacity: 1; transform: translate(-50%, 0); }
+  .field { margin-bottom: 13px; }
+  .field > label { display: block; font-size: 14px; font-weight: 900; margin-bottom: 6px; opacity: .85; }
+  .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .opts button { padding: 7px 12px; border-radius: 10px; font-size: 14px; font-weight: 700; background: rgba(255, 255, 255, .1); }
+  .opts button.on { background: #4f7bff; box-shadow: 0 0 0 2px #fff inset; }
+  .opts button.sw { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .3); }
+  .opts button.sw.on { box-shadow: 0 0 0 3px #fff; border-color: #0b1530; }
+  .opts button.wp { width: 92px; padding: 6px 2px; font-size: 13px; }
+  .opts button.wp.off { opacity: .35; text-decoration: line-through; background: rgba(255, 60, 60, .25); }
+  .opts button.lock { opacity: .45; }
+  .opts button.buy, button.buy { background: rgba(80, 200, 255, .22); box-shadow: 0 0 0 1px rgba(120, 220, 255, .5) inset; }
+  button.buy.confirm { background: #2fae5a; box-shadow: none; }
+  button.poor { opacity: .55; }
+  .modeDesc { margin: -6px 0 12px; }
+  .trackInfo { margin: -4px 0 13px; padding: 8px 12px; border-radius: 10px; background: rgba(255, 255, 255, .06); opacity: .9; }
+  .secTitle { margin: 6px 0 8px; font-size: 16px; font-weight: 900; color: #ffd23c; }
+  .secTitle small { margin-left: 6px; font-size: 12px; color: #fff; opacity: .7; font-weight: 700; }
+  .card { margin-bottom: 8px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, .07); }
+  .card.locked { opacity: .55; }
+  .card.on { box-shadow: 0 0 0 2px #ffd23c inset; }
+  .card.chal.done { background: rgba(80, 220, 120, .1); }
+  .cardHead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 17px; }
+  .cardHead .ic { font-size: 22px; }
+  .cardHead .tro { flex: 1; font-size: 14px; font-weight: 900; color: #ffd23c; }
+  .cardSub { margin-top: 3px; font-size: 13px; opacity: .78; line-height: 1.5; }
+  .btn.sm { padding: 6px 14px; font-size: 14px; border-radius: 10px; box-shadow: 0 3px 0 #18265a; }
+  .btn.sm:active { transform: translateY(2px); box-shadow: 0 1px 0 #18265a; }
+  .btn.go2 { background: #ff3d6e; box-shadow: 0 3px 0 #a11a3e; }
+  .tag { padding: 4px 10px; border-radius: 9px; font-size: 13px; font-weight: 900; background: rgba(255, 255, 255, .1); white-space: nowrap; }
+  .tag.on { background: #ffd23c; color: #0b1530; }
+  .tag.lock { background: rgba(255, 255, 255, .06); opacity: .85; }
+  .gcard .stat { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 12px; font-weight: 700; }
+  .gcard .stat span { width: 44px; opacity: .8; }
+  .gcard .stat b { width: 26px; text-align: right; font-size: 12px; }
+  .gcard .bar { position: relative; flex: 1; height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+  .gcard .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #4f7bff; }
+  .gcard .bar em { position: absolute; top: 0; bottom: 0; background: #8dff6a; }
+  .uprow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 6px; padding: 8px 12px; border-radius: 12px; background: rgba(255, 255, 255, .07); }
+  .uprow .un { flex: 1 1 130px; } .uprow .un b { display: block; font-size: 15px; } .uprow .un small { font-size: 12px; opacity: .75; }
+  .pips { display: flex; gap: 4px; } .pips i { width: 14px; height: 14px; border-radius: 4px; background: rgba(255, 255, 255, .15); }
+  .pips i.on { background: #8dff6a; }
+  .lvBox { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .lvBig { font-size: 40px; font-weight: 900; font-style: italic; color: #ffd23c; }
+  .lvRest { flex: 1; }
+  .task { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; padding: 7px 12px; border-radius: 10px; background: rgba(255, 255, 255, .07);
+    font-size: 14px; font-weight: 700; }
+  .task > span:first-child { flex: 1; min-width: 0; }
+  .task .xpbar { flex: 0 0 72px; }
+  .task .tp { width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+  .task.done { opacity: .6; }
+  .achGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-bottom: 10px; }
+  .ach { padding: 7px 10px; border-radius: 10px; background: rgba(255, 255, 255, .05); opacity: .55; }
+  .ach.done { opacity: 1; background: rgba(255, 210, 60, .14); }
+  .ach b { display: block; font-size: 14px; } .ach small { display: block; font-size: 12px; opacity: .8; line-height: 1.4; }
+  .ach span { font-size: 11px; color: #9fe4ff; }
+  .statGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 14px; margin-bottom: 10px; font-size: 13px; }
+  .statGrid div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+  .statGrid span { opacity: .75; }
+  .keys { font-size: 15px; line-height: 2; }
+  .keys kbd { display: inline-block; min-width: 30px; padding: 0 8px; margin-right: 4px; border-radius: 7px; background: #fff; color: #0b1530;
+    font-family: inherit; font-weight: 900; text-align: center; box-shadow: 0 3px 0 #9aa3c4; }
+  .note { font-size: 13px; opacity: .7; line-height: 1.6; }
+  #goWrap { width: min(100%, 460px); padding: 12px 12px 16px; pointer-events: auto; }
+  #matchRow { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  #btnMatch { flex: 1 1 150px; padding: 9px 14px; font-size: 17px; }
+  #nameInput { flex: 1 1 150px; min-width: 0; padding: 8px 12px; border-radius: 10px; border: 2px solid rgba(255, 255, 255, .25);
+    background: rgba(255, 255, 255, .1); color: #fff; font-family: inherit; font-size: 15px; font-weight: 700; outline: none; user-select: text; }
+  #nameInput:focus { border-color: #ffd23c; }
+  #nameInput::placeholder { color: rgba(255, 255, 255, .5); }
+
+  /* 大厅：窗口变小时逐级收紧 */
+  @media (max-width: 1320px) { #sub { display: none; } }
+  @media (max-width: 1100px) {
+    #menuTop { flex-wrap: wrap; }
+    .tabs { order: 3; flex: 1 1 100%; }
+    .tabs button { flex: 1; padding: 8px 0; }
+  }
+  @media (max-height: 700px) {
+    #sub { display: none; }
+    #menu { gap: 10px; padding: 10px 14px 12px; }
+    #btnGo { padding: 11px; font-size: 22px; }
+  }
+  /* 放不下三列：改成一列，整页一起滚动，开始按钮吸在底部 */
+  @media (max-width: 900px) {
+    #menu { display: flex; flex-direction: column; overflow-y: auto; }
+    #menuTop, .col { flex: none; }
+    .col { align-self: stretch; max-height: none; }
+    .colBody { overflow: visible; }
+    #menuMid { flex: none; align-self: stretch; position: sticky; bottom: 0; }
+    #menuToast { top: auto; bottom: 100%; margin-bottom: 8px; }
+  }
+
+  /* ---------- 联机匹配 ---------- */
+  #match { align-items: center; padding-left: 4vw; background: linear-gradient(90deg, rgba(11, 21, 48, .5), rgba(11, 21, 48, 0) 55%); }
+  #matchBox { width: 440px; max-height: 94vh; padding: 22px 24px; overflow-y: auto; }
+  #matchBox h2 { margin: 0 0 6px; font-size: 44px; font-style: italic; color: #ffd23c; }
+  #matchStatus { min-height: 24px; margin-bottom: 14px; font-size: 17px; font-weight: 900; }
+  #matchStatus.bad { color: #ff5a6a; }
+  #matchList .row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; margin-bottom: 4px; border-radius: 10px;
+    background: rgba(255, 255, 255, .08); font-size: 16px; font-weight: 700; }
+  #matchList .row.me { background: #ffd23c; color: #0b1530; }
+  #matchList .row.empty { opacity: .45; font-size: 14px; }
+  #matchList .dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #0b1530; background: rgba(255, 255, 255, .25); }
+  #matchList .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---------- 结算 / 暂停 ---------- */
+  #results, #pause { align-items: center; justify-content: center; background: rgba(11, 21, 48, .45); }
+  #resBox { width: min(960px, 96vw); max-height: 94vh; overflow-y: auto; padding: 22px 26px; }
+  #resBody { display: flex; gap: 18px; align-items: flex-start; }
+  #resList { flex: 1; min-width: 0; }
+  #resReward { width: 360px; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, .06); font-size: 13px; font-weight: 700; }
+  #resReward .rl { display: flex; gap: 6px; padding: 3px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
+  #resReward .rl > span:first-child { flex: 1; }
+  #resReward .rx { width: 48px; text-align: right; color: #8dff6a; }
+  #resReward .rc { width: 62px; text-align: right; color: #9fe4ff; }
+  #resReward .rl.head { font-size: 12px; opacity: .7; }
+  #resReward .rl.head .rx, #resReward .rl.head .rc { color: #fff; }
+  #resReward .rl.note { font-size: 11px; opacity: .6; }
+  #resReward .rl.gold > span:first-child { color: #ffd23c; }
+  #resReward .rl.good > span:first-child { color: #8dff6a; }
+  #resReward .rl.total { font-size: 16px; font-weight: 900; border-bottom: 0; padding-top: 6px; }
+  #resReward .rl.unl { display: block; border: 0; line-height: 1.5; }
+  #resReward .rlv { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 14px; }
+  #resReward .rlv b { color: #ffd23c; }
+  #resReward .rlv .xpbar { flex: 1; }
+  #resBox h2 { margin: 0 0 4px; font-size: 44px; font-style: italic; color: #ffd23c; }
+  #resSub { font-size: 16px; font-weight: 700; margin-bottom: 14px; opacity: .9; }
+  #resList .row { display: flex; align-items: center; gap: 10px; padding: 6px 12px; margin-bottom: 4px; border-radius: 10px;
+    background: rgba(255, 255, 255, .08); font-size: 16px; font-weight: 700; }
+  #resList .row.me { background: #ffd23c; color: #0b1530; }
+  #resList .n { width: 30px; font-size: 22px; font-weight: 900; font-style: italic; }
+  #resList .nm { flex: 1; }
+  #resList .tm { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
+  #resList .pt { width: 120px; text-align: right; }
+  .btnRow { display: flex; gap: 12px; margin-top: 18px; }
+  .btnRow .btn { flex: 1; }
+  #pauseBox { width: 360px; padding: 26px; text-align: center; }
+  #pauseBox h2 { margin: 0 0 18px; font-size: 40px; font-style: italic; color: #ffd23c; }
+  #pauseBox .btn { width: 100%; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="impact" class="hidden">
+    <div id="impactBar"><span id="impactLive">现场</span><span id="impactWho"></span><span id="impactCause"></span></div>
+  </div>
+  <div id="pos" class="stroke"><span id="posNum">1</span><span id="posTotal">/8</span></div>
+  <div id="timer" class="stroke">00:00.0</div>
+  <div id="round" class="stroke"></div>
+  <div id="progress"></div>
+  <div id="side"><div id="rank"></div><div id="modeBox" class="hidden"></div></div>
+  <div id="feed"></div>
+  <div id="trickPop" class="stroke"></div>
+  <div id="banner" class="stroke"></div>
+  <div id="count" class="stroke"></div>
+  <div id="tip" class="stroke"></div>
+  <div id="item">
+    <div id="itemSlot"><span id="itemIcon"></span><div id="itemAmmo" class="hidden"></div></div>
+    <div id="itemName" class="stroke"></div>
+    <div id="itemKey" class="stroke">J / 鼠标左键 使用</div>
+  </div>
+  <div id="speed" class="stroke"><b id="speedNum">0</b> km/h</div>
+  <div id="hint" class="stroke">A/D 转向 · W 俯冲 · S 刹车 · Shift 漂移 · 空格 跳（空中按住翻跟头）· J 用道具 · R 复位 · Esc 暂停</div>
+</div>
+
+<div id="menu" class="overlay">
+  <header id="menuTop" class="panel">
+    <div id="brand">
+      <h1 id="title" class="stroke">雪山大乱斗</h1>
+      <div id="sub">一边高速滑雪，一边掏出火箭筒打架 · 谁先冲到山脚谁就赢</div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="race" class="on">比赛</button>
+      <button data-tab="events">赛事</button>
+      <button data-tab="growth">成长</button>
+      <button data-tab="garage">车库</button>
+      <button data-tab="look">角色</button>
+      <button data-tab="rules">规则</button>
+      <button data-tab="keys">操作</button>
+    </nav>
+    <div id="profileWrap"><div id="profileBar"></div></div>
+  </header>
+  <div class="tab" id="tab-race"></div>
+  <div class="tab hidden" id="tab-events"></div>
+  <div class="tab hidden" id="tab-growth"></div>
+  <div class="tab hidden" id="tab-garage"></div>
+  <div class="tab hidden" id="tab-look"></div>
+  <div class="tab hidden" id="tab-rules"></div>
+  <div class="tab hidden" id="tab-keys">
+    <section class="col l panel">
+      <h2 class="colTitle">键位</h2>
+      <div class="colBody">
+        <div class="keys">
+          <div><kbd>A</kbd><kbd>D</kbd> 或 <kbd>←</kbd><kbd>→</kbd> 左右转向</div>
+          <div><kbd>W</kbd> 或 <kbd>↑</kbd> 俯冲加速（低速时撑杖起步）</div>
+          <div><kbd>S</kbd> 或 <kbd>↓</kbd> 犁式刹车</div>
+          <div><kbd>空格</kbd> 起跳</div>
+          <div><kbd>Shift</kbd> 或 <kbd>L</kbd> + 方向 漂移：转得更急、几乎不掉速，松开时按蓄力喷射</div>
+          <div>腾空时按住 <kbd>空格</kbd> / <kbd>E</kbd> 后空翻，<kbd>Q</kbd> 前空翻</div>
+          <div><kbd>J</kbd> / <kbd>F</kbd> / 鼠标左键 使用道具</div>
+          <div><kbd>R</kbd> 复位到赛道中央</div>
+          <div><kbd>Esc</kbd> 暂停 &nbsp; <kbd>M</kbd> 静音</div>
+        </div>
+      </div>
+    </section>
+    <section class="col r panel">
+      <h2 class="colTitle">玩法说明</h2>
+      <div class="colBody">
+        <p class="note" style="margin-top:0">撞上蓝紫色泡泡获得随机道具，名次越靠后越容易拿到强力道具。被炸飞后会翻滚一小段再爬起来，爬起后有短暂无敌。高速正面撞树、撞岩石也会翻车。</p>
+        <p class="note"><b>翻跟头</b>：红旗大跳台、黄旗断崖、绿旗波浪坡都能飞起来。空中转满整圈再落地就加速，圈数越多越快；没转正就落地会摔。<br>
+          <b>近道</b>：主路绕大弯的地方，路边会有一个两侧立着石墙的窄口。里面是之字形急弯窄道：先收到 100 km/h 以下，再连着漂两个弯才进得去；不漂移要么撞墙，要么慢到白抄。过了急弯是一条更短、阻力更小的冰道。</p>
+        <p class="note"><b>地形</b>：淡蓝色的<b>冰面</b>阻力小、速度快，但抓地差、容易甩尾；白色松软的<b>深雪</b>会拖慢速度（单板和充气圈受影响小，雪橇最怕）。地上闪着箭头的<b>加速带</b>冲过去直接提速。<br>
+          <b>机关</b>：雪地摩托会横穿雪道、滚石从山坡上砸下来，路边有警示牌；雪崩赛道上，领先者经过触发点后雪崩会从身后追来，被追上就会被卷飞。</p>
+        <p class="note"><b>装备</b>：双板均衡；单板漂移和空翻强；雪橇极速高但笨重；充气圈起步快、几乎撞不翻。在「车库」里花雪花币强化。</p>
+      </div>
+    </section>
+  </div>
+  <div id="menuMid">
+    <div id="menuToast"></div>
+    <div id="goWrap" class="panel">
+      <button class="btn go" id="btnGo">开始比赛 ▶</button>
+      <div id="matchRow">
+        <input id="nameInput" maxlength="12" autocomplete="off" placeholder="联机昵称（不填自动起名）" aria-label="联机昵称" />
+        <button class="btn" id="btnMatch">联机匹配 ▶</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="match" class="overlay hidden">
+  <div id="matchBox" class="panel">
+    <h2 class="stroke">联机匹配</h2>
+    <div id="matchStatus"></div>
+    <div id="matchList"></div>
+    <p class="note">匹配赛固定为中等长度、随机场景、道具开启。开赛时空位由机器人补齐；比赛中途不能暂停。</p>
+    <div class="btnRow">
+      <button class="btn" id="btnCancelMatch">返回大厅</button>
+      <button class="btn go hidden" id="btnStartNow" style="font-size:20px;padding:12px">立即开始 ▶</button>
+    </div>
+  </div>
+</div>
+
+<div id="results" class="overlay hidden">
+  <div id="resBox" class="panel">
+    <h2 id="resTitle" class="stroke">比赛结束</h2>
+    <div id="resSub"></div>
+    <div id="resBody"><div id="resList"></div><div id="resReward" class="hidden"></div></div>
+    <div class="btnRow">
+      <button class="btn" id="btnLobby">返回大厅</button>
+      <button class="btn go" id="btnNext" style="font-size:22px;padding:12px">再来一局 ▶</button>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <div id="pauseBox" class="panel">
+    <h2 class="stroke" id="pauseTitle">暂停</h2>
+    <p class="note hidden" id="pauseNote" style="margin:-8px 0 14px">联机比赛不会暂停，其他人还在跑。</p>
+    <button class="btn go" id="btnResume" style="font-size:22px;padding:12px">继续比赛</button>
+    <button class="btn" id="btnRestart">重新开始本局</button>
+    <button class="btn" id="btnQuit">返回大厅</button>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
