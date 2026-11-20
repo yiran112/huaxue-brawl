@@ -15,6 +15,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 const FREEZE_R = 5; // 冰爆半径
 const FREEZE_TIME = 2.6;
+const EVADE_R = 55; // 追踪导弹离多近时，漂移喷射 / 空中动作能把它甩掉
 // 加特林：一次扣扳机扫一梭子
 const GAT_TIME = 1.25; // 一梭子打多久
 const GAT_RATE = 16; // 每秒几发
@@ -578,6 +579,9 @@ class Airstrike {
   }
 }
 
+const STRIKE_LOCK = 0.55; // 雷击最后这么久不再跟着人走，劈在按速度预判的落点上
+const STRIKE_R = 2.6; // 离落点多近会被劈中
+
 class Strike {
   constructor(W, owner, target, delay) {
     this.W = W;
@@ -585,6 +589,8 @@ class Strike {
     this.owner = owner;
     this.target = target;
     this.t = delay;
+    this.isStrike = true;
+    this.spot = null;
     this.geo = new THREE.RingGeometry(0.8, 1, 24);
     this.geo.rotateX(-Math.PI / 2);
     this.mark = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ color: 0xfff27a, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide, fog: false }));
@@ -594,15 +600,25 @@ class Strike {
   update(dt) {
     this.t -= dt;
     const tg = this.target;
-    this.mark.position.copy(tg.pos);
+    if (!this.spot && this.t <= STRIKE_LOCK) {
+      const s = (this.spot = new THREE.Vector3()).copy(tg.pos).addScaledVector(tg.vel, Math.max(0, this.t));
+      s.y = this.game.course.height(s.x, s.z);
+      this.mark.material.color.setHex(0xff4a3d);
+    }
+    const at = this.spot || tg.pos;
+    this.mark.position.copy(at);
     this.mark.position.y += 0.4;
-    this.mark.scale.setScalar(1.5 + this.t * 5);
+    this.mark.scale.setScalar(this.spot ? (STRIKE_R / 0.9) * (1 + Math.max(0, this.t)) : 1.5 + this.t * 5);
     if (this.t <= 0) {
-      this.game.fx.lightning(tg.pos);
-      this.game.sfxAt('thunder', tg.pos, 1);
-      this.game.shakeAt(tg.pos, 7);
-      _v.set((Math.random() - 0.5) * 8, 10, (Math.random() - 0.5) * 8);
-      tg.knock(_v, 1.3, this.owner, WEAPONS.lightning.name);
+      this.game.fx.lightning(at);
+      this.game.sfxAt('thunder', at, 1);
+      this.game.shakeAt(at, 7);
+      const dx = tg.pos.x - at.x;
+      const dz = tg.pos.z - at.z;
+      if (dx * dx + dz * dz < STRIKE_R * STRIKE_R) {
+        _v.set((Math.random() - 0.5) * 8, 10, (Math.random() - 0.5) * 8);
+        tg.knock(_v, 1.3, this.owner, WEAPONS.lightning.name);
+      }
       return false;
     }
     return true;
@@ -1078,6 +1094,24 @@ export class Weapons {
     return this.game.racers[i] || null;
   }
 
+  // 被追踪导弹咬住时漂移喷射、空中动作落地：近处咬着他的导弹跟丢，往上偏出去
+  // remote：联机时别人那边甩掉的，这里只照做一遍
+  evade(r, remote = false) {
+    let n = 0;
+    for (const e of this.game.entities) {
+      const R = remote ? EVADE_R * 1.5 : EVADE_R;
+      if (e.kind !== 'homing' || e.target !== r || e.pos.distanceToSquared(r.pos) > R * R) continue;
+      e.target = null;
+      e.dir.y = Math.max(e.dir.y, 0) + 0.6;
+      e.dir.x += (e.pos.x < r.pos.x ? -0.5 : 0.5);
+      e.dir.normalize();
+      n++;
+    }
+    if (!n || remote) return;
+    if (r.owned) this.game.net.ev('evade', { i: r.idx });
+    this.game.onEvade?.(r);
+  }
+
   // 本机负责的选手使用道具
   use(r) {
     if (!r.weapon || r.state !== 'ski' || r.frozenT > 0 || r.finished) return;
@@ -1195,7 +1229,7 @@ export class Weapons {
     this.game.sfxAt('whoosh', r.pos, 1);
   }
   shield(r) {
-    r.shieldT = 7;
+    r.shieldT = 7 + r.mods.shield;
     this.game.sfxAt('shield', r.pos, 1);
   }
 
@@ -1279,7 +1313,7 @@ export class Weapons {
       return false;
     }
     if (!ex) this.out.tg = list.map((o) => o.idx);
-    list.forEach((o, i) => this.add(new Strike(this, r, o, 0.7 + i * 0.18)));
+    list.forEach((o, i) => this.add(new Strike(this, r, o, 1.1 + i * 0.15)));
     this.game.sfxAt('zap', r.pos, 0.6);
   }
 

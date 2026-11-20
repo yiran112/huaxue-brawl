@@ -1,21 +1,24 @@
-// 玩家存档与成长：等级经验、雪花币、解锁购买、装备强化、每日任务、成就、生涯数据、结算奖励。
+// 玩家存档与成长：等级经验、雪花币、改装币、解锁购买、装备改装、每日任务、成就、生涯数据、结算奖励。
 // 浏览器里留一份缓存；账号登录之后，服务器上的那份为准（见 src/account.js）。
 import { HATS, MODE_KEYS, MODES, POINTS } from './config.js';
-import { GEAR, GEAR_KEYS, RARITY, UP_KEYS, UP_MAX, UP_COST, HAT_UNLOCK, COSMETIC_SLOTS } from './gear.js';
+import { GEAR, GEAR_KEYS, RARITY, UPGRADES, UP_KEYS, UP_MAX, UP_COST, HAT_UNLOCK, COSMETIC_SLOTS, BOX_COST, BOX_REFUND, BOX_POOL, rollBox, unlockOf } from './gear.js';
 import { CUPS, TRACKS, medalTimes } from './tracks.js';
-import { RANK_LV, RANK_MAP, tierAt, scoreRank, localDay } from './rank.js';
+import { RANK_LV, RANK_MAP, tierAt, scoreRank, scoreLeave, localDay } from './rank.js';
 import { mulberry32 } from './util.js';
 
 const LS = 'huaxue_profile_v1';
 export const MAX_LV = 60;
 export const CUP_LV = [0, 4, 8, 12]; // 赛道分组按等级解锁
 export const START_COINS = 300;
+export const START_PARTS = 300; // 改装币：只用来改装，比赛和每日任务里拿
 // 从 lv 升到 lv+1 需要的经验
 export const xpNeed = (lv) => 150 + (lv - 1) * 60;
 
 export const TASK_XP = 80;
 export const TASK_COINS = 60;
+export const TASK_PARTS = 50;
 export const TASK_BONUS = 150; // 当天三个任务全做完的额外奖励
+export const TASK_BONUS_PARTS = 100;
 
 // key：对应一局比赛统计里的字段（modes 特殊处理：当天玩过几种模式）
 export const TASKS = [
@@ -65,7 +68,7 @@ export const ACHIEVEMENTS = [
   { id: 'gearAll', name: '装备收藏家', desc: '拥有双板、单板、雪橇和充气圈', test: (s, p) => ['ski', 'board', 'sled', 'tube'].every((k) => p.gearOwned(k)), coins: 600 },
   { id: 'gearS', name: '传说入手', desc: '拥有一件 S 级滑行装备', test: (s, p) => GEAR_KEYS.some((k) => GEAR[k].rarity === 'S' && p.gearOwned(k)), coins: 800, title: '传说收藏' },
   { id: 'gearFull', name: '车库满员', desc: '拥有全部滑行装备', test: (s, p) => GEAR_KEYS.every((k) => p.gearOwned(k)), coins: 2500, title: '车库满员' },
-  { id: 'upMax', name: '改装狂人', desc: '把一件装备的三条强化全部升满', test: (s, p) => GEAR_KEYS.some((k) => UP_KEYS.every((u) => p.up(k)[u] >= UP_MAX)), coins: 600 },
+  { id: 'upMax', name: '改装狂人', desc: '把一件装备的改装树全部改满', test: (s, p) => GEAR_KEYS.some((k) => UP_KEYS.every((u) => p.up(k)[u] >= UP_MAX)), coins: 600 },
   { id: 'gold1', name: '踏入白银', desc: '排位达到白银', test: (s, p) => p.rankPoints() >= 100, coins: 500, title: '白银车手' },
   { id: 'cupAll', name: '黄金车手', desc: '排位达到黄金', test: (s, p) => p.rankPoints() >= 250, coins: 800, title: '黄金车手' },
   { id: 'chal5', name: '排位新秀', desc: '完成 5 场排位赛', test: (s, p) => (p.data.rank && p.data.rank.games) >= 5, coins: 400 },
@@ -93,6 +96,15 @@ const SEASON_WEEK = 7 * 86400000;
 
 export function blankSeason(id) {
   return { id, points: 0, hits: 0, tt: 0, ttTrack: '', ttTime: 0 };
+}
+
+// 段位赛季比积分榜长：4 周一换，和周赛季同一天起算
+const RANK_SEASON = 4 * SEASON_WEEK;
+
+export function rankSeasonNow(now = Date.now()) {
+  const id = Math.max(1, Math.floor((now - SEASON_EPOCH) / RANK_SEASON) + 1);
+  const start = SEASON_EPOCH + (id - 1) * RANK_SEASON;
+  return { id, start, end: start + RANK_SEASON, left: start + RANK_SEASON - now };
 }
 
 export function seasonNow(now = Date.now()) {
@@ -135,13 +147,21 @@ export function normalizeSeason(raw) {
   return s;
 }
 
+// 昵称：2~12 位中文、字母、数字或下划线
+export const NAME_RE = /^[\u4e00-\u9fffA-Za-z0-9_]{2,12}$/;
+export const cleanNick = (s) => (typeof s === 'string' && NAME_RE.test(s.trim()) ? s.trim() : '');
+export const randomNick = (rng = Math.random) => `滑雪客${1000 + Math.floor(rng() * 9000)}`;
+export const isAutoNick = (s) => /^滑雪客\d{4}$/.test(s || '');
+
 const defaults = () => ({
   v: 1,
+  name: '',
   xp: 0,
   coins: START_COINS,
+  parts: START_PARTS,
   title: '',
   owned: {}, // 买下的东西：'gear:sled'、'hat:6'、'back:3' ……
-  up: {}, // 装备强化：{ ski: { wax, bind, pad } }
+  up: {}, // 装备改装树：{ ski: { core: 3, wax: 1, … } }，没改过的节点不存
   stats: {
     races: 0, wins: 0, podiums: 0, hits: 0, knocked: 0, flips: 0, driftBoosts: 0, shortcuts: 0, pads: 0,
     maxFlip: 0, maxSpeed: 0, maxAir: 0, cleanWins: 0, teamWins: 0, elimWins: 0, bestTrick: 0, bestBrawl: 0,
@@ -157,13 +177,14 @@ const defaults = () => ({
   rank: null, // 排位：{ pts, games, wins, day, season }
   daily: null,
   season: blankSeason(0),
+  boxSeed: 0, // 补给箱的随机种子（服务器发）和已经开过几个：开出什么由这两个数决定
+  boxN: 0,
 });
 
-// days：往后数几天（0 = 今天）
+// days：往后数几天（0 = 今天）。按北京时间换天，服务器重算存档时和浏览器对得上
 function todayKey(days = 0) {
-  const d = new Date();
-  if (days) d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const d = new Date(Date.now() + SEASON_TZ + days * 86400000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 // 某一天的三个每日任务：只由日期决定，所以明天是哪三个今天就能算出来
@@ -201,6 +222,7 @@ function mergeProfile(saved) {
   const def = defaults();
   const src = saved && typeof saved === 'object' ? saved : {};
   const d = { ...def, ...src, v: 1 };
+  d.name = cleanNick(d.name);
   d.stats = { ...def.stats, ...(src.stats || {}) };
   for (const k of ['owned', 'up', 'modes', 'best', 'medals', 'ach', 'cups', 'chal']) d[k] = { ...(src[k] || {}) };
   d.season = normalizeSeason(src.season);
@@ -219,8 +241,11 @@ function readLocal() {
 export function sanitizeProfile(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
   const d = defaults();
+  d.name = cleanNick(src.name);
   d.xp = clampNum(src.xp, 0, 200000);
   d.coins = clampNum(src.coins, 0, 10000000);
+  // 改装币是后加的：旧存档里没有这一项的，补上开局的那一份
+  d.parts = src.parts == null ? START_PARTS : clampNum(src.parts, 0, 10000000);
   const titleAch = TITLE_ACH.get(src.title);
   d.title = '';
   d.owned = {};
@@ -281,6 +306,8 @@ export function sanitizeProfile(raw) {
   d.rank = sanitizeRank(src.rank);
   d.daily = sanitizeDaily(src.daily);
   d.season = normalizeSeason(src.season);
+  d.boxSeed = clampNum(src.boxSeed, 0, 0x7fffffff);
+  d.boxN = clampNum(src.boxN, 0, 1e7);
   return d;
 }
 
@@ -292,6 +319,10 @@ function sanitizeRank(raw) {
     wins: clampNum(r.wins, 0, 1e7),
     day: typeof r.day === 'string' ? r.day.slice(0, 16) : '',
     season: clampNum(r.season, 0, 100000),
+    // 本段位赛季打了几场；老存档没有这项，那时还在第 1 个段位赛季里，全部场次都算
+    sg: clampNum(r.sg == null ? r.games : r.sg, 0, 1e7),
+    // 正在打、还没结算的那场排位。开赛写上，结算清掉；下次打开游戏还在，说明是中途关掉走的
+    pending: r.pending && RANK_MAP[r.pending.mode] ? { mode: r.pending.mode, at: clampNum(r.pending.at, 0, 1e15) } : null,
   };
 }
 
@@ -314,12 +345,18 @@ function sanitizeDaily(raw) {
   return { date: raw.date, tasks, modes, bonus };
 }
 
+// 动到雪花币、经验、装备、排位的操作都会记一条（onOp），服务器按同样的顺序在它那份存档上重做一遍
 export class Profile {
   constructor() {
     this.onSave = null;
+    this.onOp = null;
     this._silent = false;
     this.data = mergeProfile(readLocal());
     this.ensureDaily();
+  }
+
+  log(op) {
+    if (this.onOp) this.onOp(op);
   }
 
   _writeLocal() {
@@ -368,6 +405,14 @@ export class Profile {
     if (n > 0) this.data.stats.coinsEarned += n;
   }
 
+  get parts() {
+    return this.data.parts | 0;
+  }
+
+  addParts(n) {
+    this.data.parts = Math.max(0, (this.data.parts | 0) + n);
+  }
+
   // ---------- 解锁 / 购买 ----------
   // 'free' 不需要解锁 / 'owned' 已拥有 / 'buy' 可以买 / 'locked' 等级或成就不够
   unlockState(u, key) {
@@ -388,6 +433,7 @@ export class Profile {
     if (this.unlockState(u, key) !== 'buy' || this.data.coins < u.cost) return false;
     this.data.coins -= u.cost;
     this.data.owned[key] = true;
+    this.log({ op: 'buy', key });
     this.save();
     return true;
   }
@@ -406,7 +452,36 @@ export class Profile {
     return this.usable(item.unlock, `${slot}:${i}`);
   }
 
-  // ---------- 装备强化 ----------
+  // ---------- 雪花补给箱 ----------
+  // 到了等级自动解锁的外观也算已经有了
+  boxOwned(key) {
+    return this.usable(unlockOf(key), key);
+  }
+
+  boxDone() {
+    return BOX_POOL.every((it) => this.boxOwned(it.key));
+  }
+
+  // 返回 { key, tier, dup }；钱不够或者已经全收集了返回 null。rng 只给测试用
+  openBox(rng) {
+    if (this.data.coins < BOX_COST || this.boxDone()) return null;
+    const d = this.data;
+    if (!rng) {
+      if (!d.boxSeed) d.boxSeed = 1 + Math.floor(Math.random() * 0x7ffffffe);
+      rng = mulberry32((d.boxSeed ^ Math.imul(d.boxN + 1, 0x9e3779b1)) | 0);
+      d.boxN++;
+    }
+    const item = rollBox(rng);
+    const dup = this.boxOwned(item.key);
+    d.coins -= BOX_COST;
+    if (dup) d.coins += BOX_REFUND;
+    else d.owned[item.key] = true;
+    this.log({ op: 'box' });
+    this.save();
+    return { ...item, dup };
+  }
+
+  // ---------- 装备改装树 ----------
   up(gear) {
     const u = this.data.up[gear] || {};
     const out = {};
@@ -414,19 +489,37 @@ export class Profile {
     return out;
   }
 
-  upgradeCost(gear, line) {
-    const lv = this.up(gear)[line];
-    if (lv >= UP_MAX) return 0;
+  // 节点还没解锁时返回要先改满的那个节点，已经解锁返回 ''
+  upNeed(gear, line) {
+    const need = UP_KEYS.includes(line) ? UPGRADES[line].need : '';
+    return need && this.up(gear)[need] < UP_MAX ? need : '';
+  }
+
+  // 第 lv 级升到下一级要多少改装币
+  upStepCost(gear, line, lv) {
+    if (!UP_KEYS.includes(line) || lv >= UP_MAX) return 0;
     const mul = (RARITY[(GEAR[gear] || GEAR.ski).rarity] || RARITY.C).up;
-    return Math.round(UP_COST[lv] * mul);
+    return Math.round(UP_COST[UPGRADES[line].row][lv] * mul);
+  }
+
+  upgradeCost(gear, line) {
+    return this.upStepCost(gear, line, this.up(gear)[line]);
+  }
+
+  // 从现在的等级一口气改满要花多少
+  upgradeFullCost(gear, line) {
+    let n = 0;
+    for (let lv = this.up(gear)[line] | 0; lv < UP_MAX; lv++) n += this.upStepCost(gear, line, lv);
+    return n;
   }
 
   upgrade(gear, line) {
     const cost = this.upgradeCost(gear, line);
-    if (!cost || this.data.coins < cost || !this.gearOwned(gear)) return false;
-    this.data.coins -= cost;
+    if (!cost || this.parts < cost || !this.gearOwned(gear) || this.upNeed(gear, line)) return false;
+    this.addParts(-cost);
     const u = (this.data.up[gear] = this.up(gear));
     u[line]++;
+    this.log({ op: 'up', gear, line });
     this.save();
     return true;
   }
@@ -451,17 +544,19 @@ export class Profile {
     return this.rankState().pts;
   }
 
-  // 换赛季时保留七成积分，当作新赛季的起点
+  // 换段位赛季时保留七成积分，当作新赛季的起点
   rankState() {
-    const now = seasonNow();
+    const now = rankSeasonNow();
     let r = this.data.rank;
-    if (!r || typeof r !== 'object') r = this.data.rank = { pts: 0, games: 0, wins: 0, day: '', season: now.id };
+    if (!r || typeof r !== 'object') r = this.data.rank = { pts: 0, games: 0, wins: 0, day: '', season: now.id, sg: 0 };
     r.pts = Math.max(0, r.pts | 0);
     r.games = Math.max(0, r.games | 0);
     r.wins = Math.max(0, r.wins | 0);
+    r.sg = Math.max(0, r.sg | 0);
     if ((r.season | 0) !== now.id) {
       r.pts = Math.floor(r.pts * 0.7);
       r.season = now.id;
+      r.sg = 0;
       this.save();
     }
     return r;
@@ -528,13 +623,27 @@ export class Profile {
   // 等级提升后新解锁（或可以购买）的东西
   unlocksBetween(from, to) {
     const out = [];
-    const hit = (u) => u && u.lv && u.lv > from && u.lv <= to;
-    for (const k of GEAR_KEYS) if (hit(GEAR[k].unlock)) out.push(`${GEAR[k].icon} ${GEAR[k].name}（${GEAR[k].rarity}）${GEAR[k].unlock.cost ? '（可购买）' : ''}`);
-    HAT_UNLOCK.forEach((u, i) => hit(u) && out.push(`发型「${HATS[i]}」${u.cost ? '（可购买）' : ''}`));
+    // 补给箱里提前开到的就不再算等级奖励
+    const hit = (u, key) => u && u.lv && u.lv > from && u.lv <= to && !this.data.owned[key];
+    for (const k of GEAR_KEYS) if (hit(GEAR[k].unlock, 'gear:' + k)) out.push(`${GEAR[k].icon} ${GEAR[k].name}（${GEAR[k].rarity}）${GEAR[k].unlock.cost ? '（可购买）' : ''}`);
+    HAT_UNLOCK.forEach((u, i) => hit(u, 'hat:' + i) && out.push(`发型「${HATS[i]}」${u.cost ? '（可购买）' : ''}`));
     for (const slot in COSMETIC_SLOTS) {
-      COSMETIC_SLOTS[slot].list.forEach((it, i) => hit(it.unlock) && out.push(`${COSMETIC_SLOTS[slot].name}「${it.name}」${it.unlock.cost ? '（可购买）' : ''}`));
+      COSMETIC_SLOTS[slot].list.forEach((it, i) => hit(it.unlock, `${slot}:${i}`) && out.push(`${COSMETIC_SLOTS[slot].name}「${it.name}」${it.unlock.cost ? '（可购买）' : ''}`));
     }
     return out;
+  }
+
+  // 换周了：按上一周积分榜的名次发奖（rank 0 表示没上榜），换成新赛季。返回发了多少雪花币
+  claimSeason(id, rank) {
+    const now = seasonNow();
+    const s = this.data.season;
+    if (!s || (s.id | 0) !== (id | 0) || (s.id && s.id >= now.id)) return 0;
+    const coins = s.points > 0 ? seasonReward(rank) : 0;
+    this.data.season = blankSeason(now.id);
+    if (coins) this.addCoins(coins);
+    this.log({ op: 'season', id: id | 0, rank });
+    this.save();
+    return coins;
   }
 
   // 本周赛季成绩。换周后的第一场会先把旧周清掉，奖励由界面在连上服务器后结算。
@@ -563,6 +672,7 @@ export class Profile {
   // rep：一局比赛里玩家自己的统计（见 main.js newReport / finishReport）
   // 返回给结算界面显示的奖励明细
   applyRace(rep) {
+    this.log({ op: 'race', rep });
     const d = this.data;
     const s = d.stats;
     const lvFrom = this.level;
@@ -571,11 +681,13 @@ export class Profile {
     const frac = field > 1 ? (rep.rank - 1) / (field - 1) : 0.5;
     let xp = field > 1 ? Math.round(130 - 90 * frac) : 70;
     let coins = field > 1 ? Math.round(70 - 50 * frac) : 30;
+    let parts = field > 1 ? Math.round(60 - 30 * frac) : 30;
     if (!rep.finished) {
       xp = Math.round(xp * 0.5);
       coins = Math.round(coins * 0.5);
+      parts = Math.round(parts * 0.5);
     }
-    lines.push({ label: rep.mode === 'tt' ? '完成计时赛' : rep.finished ? `第 ${rep.rank} 名` : `第 ${rep.rank} 名（未完赛）`, xp, coins });
+    lines.push({ label: rep.mode === 'tt' ? '完成计时赛' : rep.finished ? `第 ${rep.rank} 名` : `第 ${rep.rank} 名（未完赛）`, xp, coins, parts });
     const add = (label, x, c) => {
       if (!x && !c) return;
       lines.push({ label, xp: x, coins: c });
@@ -595,11 +707,14 @@ export class Profile {
     if (rep.kind === 'online') mult *= 1.2;
     let tx = 0;
     let tc = 0;
+    let tp = 0;
     for (const l of lines) {
       l.xp = Math.round(l.xp * mult);
       l.coins = Math.round(l.coins * mult);
+      l.parts = Math.round((l.parts || 0) * mult);
       tx += l.xp;
       tc += l.coins;
+      tp += l.parts;
     }
     if (mult !== 1) lines.push({ label: rep.kind === 'online' ? '联机加成 ×1.2' : `难度系数 ×${mult.toFixed(1)}`, note: true });
 
@@ -642,6 +757,7 @@ export class Profile {
 
     d.xp += tx;
     this.addCoins(tc);
+    this.addParts(tp);
 
     // 每日任务
     this.ensureDaily();
@@ -657,14 +773,18 @@ export class Profile {
         t.done = true;
         d.xp += TASK_XP;
         this.addCoins(TASK_COINS);
-        tasks.push({ name: def.name, xp: TASK_XP, coins: TASK_COINS });
+        this.addParts(TASK_PARTS);
+        tasks.push({ name: def.name, xp: TASK_XP, coins: TASK_COINS, parts: TASK_PARTS });
       }
     }
     let bonus = 0;
+    let bonusParts = 0;
     if (!daily.bonus && daily.tasks.every((t) => t.done)) {
       daily.bonus = true;
       bonus = TASK_BONUS;
+      bonusParts = TASK_BONUS_PARTS;
       this.addCoins(bonus);
+      this.addParts(bonusParts);
     }
     const extra = rep.extra || [];
     for (const e of extra) {
@@ -678,8 +798,10 @@ export class Profile {
       lines,
       xp: tx,
       coins: tc,
+      parts: tp,
       tasks,
       bonus,
+      bonusParts,
       extra,
       ach,
       lvFrom,
@@ -688,12 +810,40 @@ export class Profile {
     };
   }
 
+  rankBegin(mode) {
+    if (!RANK_MAP[mode]) return;
+    this.rankState().pending = { mode, at: Date.now() };
+    this.log({ op: 'rankBegin', mode });
+    this.save();
+  }
+
+  // 排位没打完就离开（escape：主动退出 / 关网页；否则是掉线）。返回本次扣分，没有待结算的排位时返回 null
+  rankLeave(escape) {
+    const state = this.rankState();
+    const p = state.pending;
+    if (!p) return null;
+    state.pending = null;
+    this.log({ op: 'rankLeave', escape: !!escape });
+    const scored = scoreLeave(state, p.mode, escape);
+    if (!scored) {
+      this.save();
+      return null;
+    }
+    state.pts = scored.after;
+    state.games++;
+    state.sg++;
+    this.save();
+    return scored;
+  }
+
   applyRank(rep) {
     const state = this.rankState();
+    state.pending = null;
     const scored = scoreRank(state, rep);
     if (!scored) return { label: '排位未结算', note: true };
     state.pts = scored.after;
     state.games++;
+    state.sg++;
     if (scored.win) state.wins++;
     if (scored.win) state.day = localDay();
     const now = tierAt(state.pts);

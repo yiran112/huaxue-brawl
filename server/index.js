@@ -81,7 +81,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-match = attachMatchServer(server, { exclusive: true, log: console.log, online: onlineCount });
+match = attachMatchServer(server, { exclusive: true, log: console.log, online: onlineCount, verify: account.gearOf });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`雪山大乱斗 联机服务器已启动：http://localhost:${PORT}`);

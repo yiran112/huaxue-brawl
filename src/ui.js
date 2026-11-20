@@ -1,28 +1,59 @@
-// DOM 界面：大厅菜单、HUD、结算、暂停
+// DOM 界面：大厅菜单。匹配、积分榜、商城、比赛 HUD、结算分在 ui/ 下，方法都挂在这个 UI 上
 import { THEMES, THEME_KEYS, LENGTHS, WEAPONS, WEAPON_KEYS, SKINS, SUIT_COLORS, HATS, POINTS, MODES, MODE_KEYS } from './config.js';
-import { GEAR, GEAR_KEYS, RARITY, RARITY_KEYS, STAT_NAMES, STAT_KEYS, STAT_MAX, UPGRADES, UP_KEYS, UP_MAX, HAT_UNLOCK, COSMETIC_SLOTS, gearStats } from './gear.js';
+import { GEAR, GEAR_KEYS, RARITY, RARITY_KEYS, STAT_NAMES, STAT_KEYS, STAT_MAX, UPGRADES, UP_KEYS, UP_MAX, HAT_UNLOCK, COSMETIC_SLOTS, BOX_COST, gearStats, unlockOf } from './gear.js';
 import { TRACKS, TRACK_MAP, CUPS, CUP_MAP, medalTimes } from './tracks.js';
-import { ACH_MAP, CUP_LV, seasonNow, seasonLeftText, seasonReward, blankSeason } from './profile.js';
-import { RANK_LV, RANK_MODES, RANK_MAP } from './rank.js';
-import { fetchLeaderboard } from './account.js';
-import { TEAM_COLORS } from './modes.js';
-import { CHAIN_T, MULT_MAX } from './chain.js';
-import { fmtTime, mulberry32 } from './util.js';
-import { Quest, growthView } from './quest.js';
+import { ACH_MAP, CUP_LV, seasonNow, rankSeasonNow, seasonLeftText } from './profile.js';
+import { RANK_LV, RANK_MODES, RANK_MAP, TIERS, tierAt } from './rank.js';
+import { fmtTime } from './util.js';
+import { Quest, growthView, pageTop } from './quest.js';
+import { gearThumb } from './gearThumb.js';
+import { matchMethods } from './ui/matching.js';
+import { boardMethods } from './ui/board.js';
+import { shopMethods } from './ui/shop.js';
+import { hudMethods } from './ui/hud.js';
+import { resultsMethods } from './ui/results.js';
+import { FEAT, trackFeats, trackArt } from './ui/trackArt.js';
+import { tuneHtml } from './ui/tune.js';
+import { $, hex, esc, TIER_ICONS, SHOW, cosmeticOf } from './ui/common.js';
+export { esc } from './ui/common.js';
 
-const $ = (id) => document.getElementById(id);
-const hex = (n) => '#' + n.toString(16).padStart(6, '0');
-const BOARD_COLORS = ['#ff5a7a', '#4f7bff', '#3ddc97', '#ffb21f', '#c084fc', '#ff8a4a', '#49d6e8'];
-const boardColor = (name) => {
-  let h = 0;
-  for (const c of String(name)) h = (Math.imul(h, 33) + c.charCodeAt(0)) >>> 0;
-  return BOARD_COLORS[h % BOARD_COLORS.length];
-};
-export const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-
-const TABS = ['race', 'growth', 'garage', 'look', 'rules', 'keys', 'set'];
+const TABS = ['race', 'growth', 'garage', 'shop', 'look', 'set'];
+// 首页之外每个界面顶栏上的标题。比赛页里点开的几层按 racePick 区分
+const PAGE_TITLE = { growth: '成长', garage: '车库', shop: '商城', look: '角色', set: '设置' };
+const RACE_TITLE = { track: '赛道大厅', hall: '开房间', room: '创建房间', rank: '排位赛' };
 const DIFF_NAMES = ['简单', '普通', '困难'];
 const MEDAL = ['', '🥉', '🥈', '🥇'];
+
+// 设置页左边的分类：[key, 图标, 名字, 英文小字]
+const SET_CATS = [
+  ['match', '🎮', '对局', 'MATCH'],
+  ['items', '🎁', '道具', 'ITEMS'],
+  ['video', '🖥️', '画面声音', 'VIDEO & SOUND'],
+  ['keys', '⌨️', '操作', 'CONTROLS'],
+  ['guide', '📖', '玩法说明', 'GUIDE'],
+];
+const KEYS_HTML = `<div class="keys">
+  <div><kbd>A</kbd><kbd>D</kbd> 或 <kbd>←</kbd><kbd>→</kbd> 左右转向</div>
+  <div><kbd>W</kbd> 或 <kbd>↑</kbd> 俯冲加速（低速时撑杖起步）</div>
+  <div><kbd>S</kbd> 或 <kbd>↓</kbd> 犁式刹车</div>
+  <div><kbd>空格</kbd> 起跳</div>
+  <div><kbd>Shift</kbd> 或 <kbd>L</kbd> + 方向 漂移：转得更急、几乎不掉速，松开时按蓄力喷射</div>
+  <div>腾空时按住 <kbd>空格</kbd> / <kbd>E</kbd> 后空翻，<kbd>Q</kbd> 前空翻</div>
+  <div>腾空时 <kbd>Shift</kbd> + <kbd>A</kbd>/<kbd>D</kbd> 转体（360 / 720 / 1080）</div>
+  <div>腾空时按住 <kbd>S</kbd> 抓板，落地前松开</div>
+  <div><kbd>J</kbd> / <kbd>F</kbd> / 鼠标左键 使用道具</div>
+  <div><kbd>K</kbd> / <kbd>C</kbd> / 鼠标右键 放氮气</div>
+  <div><kbd>1</kbd> ~ <kbd>4</kbd> 表情</div>
+  <div><kbd>R</kbd> 复位到赛道中央</div>
+  <div><kbd>Esc</kbd> 暂停 &nbsp; <kbd>M</kbd> 静音</div>
+</div>`;
+const GUIDE_HTML = `<p class="note">撞上蓝紫色泡泡获得随机道具，名次越靠后越容易拿到强力道具。被炸飞后会翻滚一小段再爬起来，爬起后有短暂无敌。高速正面撞树、撞岩石也会翻车。</p>
+<p class="note"><b>翻跟头</b>：红旗大跳台、黄旗断崖、绿旗波浪坡都能飞起来。空中转满整圈再落地就加速，圈数越多越快；没转正就落地会摔。转体同理；抓板抓得越久分越高，但抓着板落地会站不稳。<br>
+  <b>技巧链</b>：空翻、转体、抓板、长滞空、漂移、加速带、抄近道、击中对手都算一招，一招接一招，每多一招倍率 +1（最高 ×10）。约 3 秒不接新招就结算「总分 × 倍率」，×3 以上结算时还有一小口加速；在空中和漂移中计时暂停。还没结算就摔了、被打中、被冻住或复位，整条作废。<br>
+  <b>近道</b>：主路绕大弯的地方，路边会有一个两侧立着石墙的窄口。里面是之字形急弯窄道：先收到 100 km/h 以下，再连着漂两个弯才进得去；不漂移要么撞墙，要么慢到白抄。过了急弯是一条更短、阻力更小的冰道。</p>
+<p class="note"><b>地形</b>：淡蓝色的<b>冰面</b>阻力小、速度快，但抓地差、容易甩尾；白色松软的<b>深雪</b>会拖慢速度（单板和充气圈受影响小，雪橇最怕）。地上闪着箭头的<b>加速带</b>冲过去直接提速。<br>
+  <b>机关</b>：雪地摩托会横穿雪道、滚石从山坡上砸下来，路边有警示牌；雪崩赛道上，领先者经过触发点后雪崩会从身后追来，被追上就会被卷飞。</p>
+<p class="note"><b>装备</b>：分 C 普通、B 优秀、A 稀有、S 传说四档，档位越高属性越强，改装也越贵。双板均衡，单板漂移和空翻强，雪橇极速高但笨重，雪圈起步快、几乎撞不翻；B、A、S 三档里还有雪地单车、冲锋艇、雪地摩托、飞碟这些造型独特的载具，各有各的长短板。前期装备随等级在「车库」里解锁购买；更高级的稀有、传说装备在「商城」里用雪花币直接买，不看等级。改装都在车库里做。</p>`;
 const THEME_ICON = { day: '☀️', sunset: '🌄', storm: '🌨️', night: '🌌' };
 
 // 模式选择大卡片：配色、英文小字、是否推荐
@@ -36,110 +67,9 @@ const MODE_STYLE = {
   tt: { en: 'TIME TRIAL', c: ['#4fd0f0', '#2775b8'] },
 };
 
-// 赛道卡片右侧的小图标：这条赛道上有什么
-const FEAT = {
-  village: ['🏘️', '山村'], lift: ['🚡', '缆车'], lumber: ['🪵', '伐木场'], icelake: ['🧊', '冰湖'], tunnel: ['🕳️', '隧道'],
-  avalanche: ['🏔️', '雪崩'], snowmobile: ['🏍️', '雪地摩托'], boulder: ['🪨', '滚石'], big: ['🛫', '大跳台'],
-  ice: ['❄️', '冰面'], powder: ['☁️', '深雪'], pads: ['⚡', '加速带'],
-};
-function trackFeats(t) {
-  const out = [];
-  const add = (k) => FEAT[k] && !out.includes(k) && out.push(k);
-  for (const l of t.landmarks || []) add(l.type);
-  if (t.avalanche) add('avalanche');
-  for (const m of t.movers || []) add(m.type);
-  if ((t.features || []).some((f) => f.type === 'big')) add('big');
-  for (const z of t.zones || []) add(z.type);
-  if (t.pads && t.pads.length) add('pads');
-  return out.slice(0, 4);
-}
-
-// 赛道卡片上的小风景（天空是卡片底色）：山形、雪道走向、树由种子决定，同一条赛道每次画得一样
-const ART = {
-  day: { far: '#a7cbef', near: '#7c9dcd', fg: '#f4f9ff', tree: '#2f6b4f', run: '#4f8dff' },
-  sunset: { far: '#e49c8c', near: '#93537f', fg: '#fff0e2', tree: '#5a3a52', run: '#ff6a3d' },
-  storm: { far: '#8c90bb', near: '#585a8a', fg: '#e9ecff', tree: '#363a5e', run: '#a77bff' },
-  night: { far: '#3a4c9a', near: '#24306e', fg: '#c6d6ff', tree: '#16204a', run: '#5cf0d4' },
-};
-const artCache = new Map();
-function trackArt(theme, seed) {
-  const key = theme + seed;
-  if (artCache.has(key)) return artCache.get(key);
-  const a = ART[theme] || ART.day;
-  const rng = mulberry32(seed);
-  const f = (v) => v.toFixed(0);
-  let s = '';
-  if (theme === 'day') s += '<circle cx="262" cy="30" r="22" fill="#fff8d0" opacity=".3"/><circle cx="262" cy="30" r="12" fill="#fff8d0"/>';
-  if (theme === 'sunset') s += `<circle cx="${f(60 + rng() * 80)}" cy="74" r="26" fill="#ffe08a" opacity=".95"/>`;
-  if (theme === 'night') {
-    s += '<path d="M-10 46 Q60 14 130 40 T270 30 T340 22" stroke="#5cf0b0" stroke-width="14" fill="none" opacity=".22"/>';
-    s += '<path d="M-10 52 Q70 24 140 46 T280 36 T340 30" stroke="#8affd0" stroke-width="4" fill="none" opacity=".35"/>';
-    for (let i = 0; i < 16; i++) s += `<circle cx="${f(rng() * 320)}" cy="${f(rng() * 60)}" r="${(0.6 + rng() * 0.9).toFixed(1)}" fill="#fff" opacity=".8"/>`;
-    s += '<circle cx="272" cy="24" r="9" fill="#f4f7ff"/>';
-  }
-  // 远山、近山（山顶带雪）。卡片底部约四分之一被信息栏挡住，景物都往上放
-  const ridge = (base, amp, n) => {
-    const pts = [];
-    for (let i = 0; i <= n; i++) {
-      const x = (i / n) * 320 + (i && i < n ? (rng() - 0.5) * 18 : 0);
-      pts.push([x, base - (i % 2 ? amp * (0.6 + rng() * 0.5) : amp * rng() * 0.3)]);
-    }
-    return pts;
-  };
-  const poly = (pts) => `0,140 ${pts.map(([x, y]) => `${f(x)},${f(y)}`).join(' ')} 320,140`;
-  s += `<polygon points="${poly(ridge(66, 30, 9))}" fill="${a.far}"/>`;
-  const near = ridge(86, 42, 7);
-  s += `<polygon points="${poly(near)}" fill="${a.near}"/>`;
-  for (let i = 1; i < near.length; i += 2) {
-    const [x, y] = near[i];
-    s += `<polygon points="${f(x)},${f(y)} ${f(x - 11)},${f(y + 13)} ${f(x - 4)},${f(y + 9)} ${f(x + 2)},${f(y + 14)} ${f(x + 11)},${f(y + 12)}" fill="${a.fg}" opacity=".9"/>`;
-  }
-  const ridgeY = (x) => {
-    for (let i = 1; i < near.length; i++) {
-      const [xa, ya] = near[i - 1];
-      const [xb, yb] = near[i];
-      if (x <= xb) return ya + ((yb - ya) * (x - xa)) / (xb - xa);
-    }
-    return near[near.length - 1][1];
-  };
-  // 前景雪坡 + 一条从山脊蜿蜒下来的雪道
-  const y0 = 84 + rng() * 6;
-  const y1 = 92 + rng() * 8;
-  s += `<path d="M0 ${f(y0)} Q${f(90 + rng() * 60)} ${f(y0 - 16)} 200 ${f(y1)} T320 ${f(y1 - 4)} L320 140 L0 140 Z" fill="${a.fg}"/>`;
-  const x0 = 110 + rng() * 100;
-  const dir = rng() < 0.5 ? -1 : 1;
-  const w1 = dir * (34 + rng() * 30);
-  const w2 = -dir * (40 + rng() * 40);
-  const top = ridgeY(x0) + 3;
-  const run = `M${f(x0)} ${f(top)} C${f(x0 + w1)} ${f(top + 14)} ${f(x0 + w1)} ${f(top + 26)} ${f(x0 + w1 * 0.3)} 100 S${f(x0 + w2)} 118 ${f(x0 + w2 * 0.6)} 146`;
-  s += `<path d="${run}" stroke="#fff" stroke-width="9" fill="none" stroke-linecap="round" opacity=".95"/>`;
-  s += `<path d="${run}" stroke="${a.run}" stroke-width="3" fill="none" stroke-dasharray="7 6" stroke-linecap="round"/>`;
-  for (let i = 0; i < 10; i++) {
-    const side = i % 2 ? 1 : -1;
-    const x = x0 + side * (46 + rng() * 120);
-    const y = 90 + rng() * 22;
-    const h = 8 + rng() * 9;
-    s += `<polygon points="${f(x)},${f(y - h)} ${f(x - h * 0.45)},${f(y)} ${f(x + h * 0.45)},${f(y)}" fill="${a.tree}"/>`;
-  }
-  if (theme === 'storm') for (let i = 0; i < 34; i++) s += `<circle cx="${f(rng() * 320)}" cy="${f(rng() * 140)}" r="${(0.8 + rng() * 1.2).toFixed(1)}" fill="#fff" opacity=".75"/>`;
-  const svg = `<svg viewBox="0 0 320 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${s}</svg>`;
-  artCache.set(key, svg);
-  return svg;
-}
-
 // 大厅每一页分成左右两栏（side：'l' / 'r'），各自带标题、各自滚动
-const col = (side, title, small, body) =>
-  `<section class="col ${side} panel"><h2 class="colTitle">${title}${small ? `<small>${small}</small>` : ''}</h2><div class="colBody">${body}</div></section>`;
 // 面板没占满屏幕时返回的“整屏”
 const FULL_FRAME = { cx: 0.5, cy: 0.5, w: 1, h: 1 };
-
-// 展厅页：角色站在中间的展台上，左边一列竖排子页签，右边信息面板。
-// label 是展台背后的全息大字；subs：[子页 key, 名字, 英文小字]，第一个是默认子页
-const SHOW = {
-  growth: { label: 'CAREER', subs: [['home', '总览', 'OVERVIEW'], ['ach', '成就', 'TROPHIES'], ['stats', '生涯', 'RECORDS']] },
-  garage: { label: 'GARAGE', subs: [['attr', '属性', 'PROPERTY'], ['up', '强化', 'UPGRADE']] },
-  look: { label: 'STYLE', subs: [['style', '造型', 'STYLE'], ['color', '配色', 'COLOR'], ['acc', '饰品', 'ACCESSORY']] },
-};
 
 // 装备的标签：最强和最弱的一项、深雪表现，都从属性表里算出来。返回 [[文字, 样式]]
 function gearTags(G) {
@@ -154,15 +84,6 @@ function gearTags(G) {
   if (powder < 1) tags.push(['深雪减速少', 'pink']);
   else if (powder > 1) tags.push(['深雪更慢', '']);
   return tags;
-}
-
-// 存档 key（'gear:sled'、'hat:6'、'back:3'）对应的解锁条件
-function unlockOf(key) {
-  const [slot, id] = key.split(':');
-  if (slot === 'gear') return GEAR[id] && GEAR[id].unlock;
-  if (slot === 'hat') return HAT_UNLOCK[+id];
-  const s = COSMETIC_SLOTS[slot];
-  return s && s.list[+id] && s.list[+id].unlock;
 }
 
 export class UI {
@@ -182,6 +103,15 @@ export class UI {
     for (const t in SHOW) this.sub[t] = SHOW[t].subs[0][0];
     this.viewGear = null; // 车库里正在看的装备（null = 正在用的那件）
     this.gearRank = null; // 车库底部按哪一档稀有度筛选（null = 跟着正在看的那件）
+    this.upPlan = 'race'; // 改装树亮哪条推荐路线
+    this.upSel = null; // 改装树上选中的节点（null = 推荐路线上下一个能改的）
+    this.shopGear = null; // 商城里正在看的商品（null = 第一件还没买的）
+    this.shopSec = 'box'; // 商城货架滚到了哪一区，左边目录跟着亮
+    this.boxWin = null; // 刚从补给箱开出来的东西：{ key, tier, dup }，展台上试穿给你看
+    this.boxFx = false; // 开箱的全屏演出还开着
+    this.achCat = 'all'; // 成就页按哪一类筛选
+    this.achSel = null; // 点开详情的那枚成就
+    this.setCat = 'match'; // 设置页左边停在哪一类
     this.racePick = null; // 'track' 赛道大厅 / 'hall' 房间列表 / 'room' 创建房间
     this.hallMode = 'all';
     this.hallRooms = [];
@@ -190,7 +120,7 @@ export class UI {
     this.onlineWait = 0;
     this.queueing = false; // 开始比赛：按钮停在匹配中，再点一次取消
     this.queueLine = '';
-    this.board = 'points'; // 首页左侧赛季榜：points / hits / tt
+    this.board = 'points'; // 首页左侧赛季榜：points / hits / tt / rank
     this.boardFull = false;
     this.boardRules = false;
     this.boardRows = null;
@@ -198,26 +128,27 @@ export class UI {
     this.rankMode = 'solo';
     this.modeSel = null; // 模式选择浮层：{ go } go = 选完直接开赛
     this.quest = new Quest(this); // 任务面板：首页「每日任务」点开的那一层
-    // Esc：先关模式选择，再退出赛道大厅
+    // Esc：和左上角的返回一样一层层往回退；已经在首页时取消匹配
     window.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || $('menu').classList.contains('hidden') || this.tab !== 'race') return;
+      if (e.key !== 'Escape') return;
       const acc = $('account');
       if (acc && !acc.classList.contains('hidden')) return;
-      if (this.modeSel) this.modeSel = null;
-      else if (this.racePick === 'track' && this.fromRoom) this.racePick = 'room';
-      else if (this.racePick) {
-        if (this.racePick === 'hall') game.net.leave();
-        if (this.racePick === 'rank' && game.netMode && !game.customRoom) game.leavePublicQueue();
-        this.racePick = null;
-        this.fromRoom = false;
-      } else if (this.queueing) {
-        game.leavePublicQueue();
+      if (!$('match').classList.contains('hidden')) return game.cancelMatch();
+      if ($('menu').classList.contains('hidden')) return;
+      if (this.tab === 'race' && !this.racePick && !this.modeSel) {
+        if (this.queueing) game.leavePublicQueue();
         return;
-      } else return;
-      this.renderTab('race');
+      }
+      this.back();
     });
-    for (const t of TABS) if (t !== 'keys') $('tab-' + t).addEventListener('click', (e) => this.onMenuClick(e));
+    $('pageTop').addEventListener('click', (e) => e.target.closest('[data-act="back"]') && this.back());
+    $('match').addEventListener('click', (e) => e.target.closest('[data-act="back"]') && game.cancelMatch());
+    for (const t of TABS) $('tab-' + t).addEventListener('click', (e) => this.onMenuClick(e));
     for (const t in SHOW) this.bindDrag($('tab-' + t));
+    this.bindGearScroll($('tab-garage'));
+    this.bindGearScroll($('tab-growth'));
+    // 滚动事件不冒泡，在捕获阶段接住货架的滚动
+    $('tab-shop').addEventListener('scroll', (e) => e.target.classList && e.target.classList.contains('shelf') && this.spyShelf(e.target), true);
     this.buildMenu();
     $('tabs').addEventListener('click', (e) => {
       const b = e.target.closest('button');
@@ -227,116 +158,16 @@ export class UI {
     $('btnNext').addEventListener('click', () => game.nextRace());
     $('btnResume').addEventListener('click', () => game.setPaused(false));
     $('btnRestart').addEventListener('click', () => game.restartRace());
-    $('btnQuit').addEventListener('click', () => game.toMenu());
+    $('btnQuit').addEventListener('click', () => game.quitRace());
     // 每日任务卡片上的刷新倒计时
     setInterval(() => {
       const el = this.tab === 'race' && !$('menu').classList.contains('hidden') && document.querySelector('#tab-race .hdaily .cd');
       if (el) el.textContent = this.dailyLeft();
       const scd = this.tab === 'race' && document.querySelector('#tab-race .scd');
-      if (scd) scd.textContent = seasonLeftText(seasonNow().left);
+      if (scd) scd.textContent = seasonLeftText((this.board === 'rank' && !this.boardRules ? rankSeasonNow() : seasonNow()).left);
     }, 20000);
-    $('btnCancelMatch').addEventListener('click', () => game.cancelMatch());
     $('btnStartNow').addEventListener('click', () => game.startMatchNow());
-  }
-
-  // ---------- 联机匹配面板 ----------
-  showMatch(b) {
-    $('match').classList.toggle('hidden', !b);
-  }
-
-  // info: { status, error } 只显示一句状态；或 { players, me, host, max } 显示房间里的人
-  setMatch(info) {
-    const list = $('matchList');
-    const status = $('matchStatus');
-    const room = info.kind === 'room' || this.game.customRoom;
-    status.classList.toggle('bad', !!info.error);
-    const title = $('matchBox') && $('matchBox').querySelector('h2');
-    if (title) title.textContent = room ? '房间' : '匹配对战';
-    const note = $('matchNote');
-    if (note) note.textContent = room ? '按房主选的玩法和赛道。空位可以继续进人，房主点开始后由机器人补齐。' : `${MODES[this.game.soloRules.mode] ? MODES[this.game.soloRules.mode].name : '道具赛'}，中等长度、随机场景。在线只有你时约 10 秒补机器人，人多最多等 30 秒；满员会提前开。比赛中途不能暂停。`;
-    const go = $('btnStartNow');
-    if (go) go.textContent = room ? '开始 ▶' : '立即开始 ▶';
-    if (!info.players) {
-      status.textContent = info.status || '';
-      list.innerHTML = '';
-      go.classList.add('hidden');
-      this.matchText = null;
-      return;
-    }
-    const n = info.players.length;
-    this.matchReason = info.reason || (room ? 'host' : 'fill');
-    this.matchText = room ? `房间里 ${n} / ${info.max} 人` : `已匹配 ${n} / ${info.max} 人`;
-    status.textContent = this.matchText;
-    const wait = this.matchReason === 'host' ? '等待玩家…' : '等待玩家…（到点由机器人补位）';
-    let html = info.players
-      .map((p) => `<div class="row ${p.id === info.me ? 'me' : ''}"><span class="dot" style="background:${hex(p.look.jacket)}"></span><span class="nm">${esc(p.name)}</span><span>${p.id === info.me ? '你' : ''}</span></div>`)
-      .join('');
-    for (let i = n; i < info.max; i++) html += `<div class="row empty"><span class="dot"></span><span class="nm">${wait}</span></div>`;
-    list.innerHTML = html;
-    go.classList.toggle('hidden', !info.host);
-  }
-
-  // 公开匹配不打开面板，只把首页按钮改成匹配中
-  setQueue(on) {
-    this.queueing = !!on;
-    this.queueAt = performance.now();
-    this.queueLine = on ? '00:00' : '';
-    this.paintGo();
-  }
-
-  // 匹配中后面显示已经等了多久
-  tickQueue() {
-    if (!this.queueing) return;
-    const s = Math.floor((performance.now() - this.queueAt) / 1000);
-    const line = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-    const wait = document.getElementById('rankWait');
-    if (wait) wait.textContent = `匹配中 ${line}`;
-    if (line === this.queueLine) return;
-    this.queueLine = line;
-    this.paintGo();
-  }
-
-  goTitle() {
-    return this.queueing ? `匹配中<span class="qtime">${this.queueLine || '00:00'}</span>` : '开始比赛';
-  }
-
-  paintGo() {
-    const b = document.querySelector('#tab-race .hgo');
-    if (!b) return;
-    const on = !!this.queueing;
-    b.classList.toggle('matching', on);
-    const title = b.querySelector('.htx b');
-    const ico = b.querySelector('.hico');
-    const thumb = b.querySelector('.hthumb');
-    if (title) title.innerHTML = this.goTitle();
-    let small = b.querySelector('.htx small');
-    if (!small) {
-      small = document.createElement('small');
-      if (title) title.after(small);
-    }
-    small.textContent = this.goLine();
-    if (ico) ico.textContent = on ? '⏳' : '⛷️';
-    const M = MODES[this.game.soloRules.mode];
-    if (thumb && M) thumb.textContent = M.icon;
-  }
-
-  // 「开始比赛」按首页选的玩法匹配，下面那行写明当前玩法
-  goLine() {
-    const m = this.game.soloRules.mode;
-    const name = MODES[m] ? MODES[m].name : '道具赛';
-    if (this.queueing) return `${name} · 再点一次取消`;
-    if (m === 'tt') return '计时赛 · 一个人滑，直接开始';
-    return `${name} · 在线匹配`;
-  }
-
-  // 匹配倒计时
-  tickMatch(ms) {
-    if (!this.matchText) return;
-    const s = Math.max(0, Math.ceil(ms / 1000));
-    const tail = this.matchReason === 'host' ? '等人中 · 房主点开始后开赛' : this.matchReason === 'fill' ? (s > 0 ? `${s} 秒后机器人补位开赛` : '机器人正在进场…') : s > 0 ? `${s} 秒后开赛` : '即将开赛…';
-    const text = `${this.matchText} · ${tail}`;
-    const el = $('matchStatus');
-    if (el.textContent !== text) el.textContent = text;
+    $('btnInvite').addEventListener('click', () => this.copyInvite());
   }
 
   // ---------- 菜单 ----------
@@ -377,32 +208,74 @@ export class UI {
 
   buildMenu() {
     this.refreshProfile();
-    for (const t of TABS) if (t !== 'keys') this.renderTab(t);
+    for (const t of TABS) this.renderTab(t);
     this.openTab(this.tab);
   }
 
   openTab(tab) {
     if (!TABS.includes(tab)) return;
-    if (tab !== 'race' && this.queueing) this.game.leavePublicQueue();
     if (tab !== this.tab) {
       this.pendingBuy = null;
       this.viewGear = null;
+      this.shopGear = null;
+      this.boxWin = null;
+      this.boxFx = false;
+      this.achSel = null;
       if (this.racePick === 'hall') this.game.net.leave();
       this.racePick = null;
       this.modeSel = null;
     }
     this.tab = tab;
-    for (const x of $('tabs').children) x.classList.toggle('on', x.dataset.tab === tab);
     for (const t of TABS) $('tab-' + t).classList.toggle('hidden', t !== tab);
-    if (tab !== 'keys') this.renderTab(tab);
+    this.renderTab(tab);
     $('menu').classList.toggle('show', !!SHOW[tab]);
+    $('menu').classList.toggle('shopping', tab === 'shop');
     this.applyShow();
   }
 
-  // 告诉主程序背景该是缆车大厅还是展厅、展台上摆哪件装备
+  // 首页顶上是标题、入口和档案；点开的界面换成 返回 + 标题 + 雪花币
+  paintTop() {
+    const title = this.tab === 'race' ? RACE_TITLE[this.racePick] : PAGE_TITLE[this.tab];
+    $('menuTop').classList.toggle('hidden', !!title);
+    $('pageTop').classList.toggle('hidden', !title);
+    if (title) $('pageTop').innerHTML = pageTop(title, this.game.profile.coins, { parts: this.tab === 'garage' ? this.game.profile.parts : null });
+  }
+
+  // 左上角返回 / Esc：先关掉界面里弹出来的那一层，再退回上一个界面，最后回到首页
+  back() {
+    const g = this.game;
+    if (this.tab !== 'race') {
+      if (this.boxFx) {
+        this.boxFx = false;
+        this.renderTab('shop');
+      } else if (this.achSel) {
+        this.achSel = null;
+        this.renderTab('growth');
+      } else this.openTab('race');
+      return;
+    }
+    if (this.modeSel) this.modeSel = null;
+    else if (this.racePick === 'track' && this.fromRoom) this.racePick = 'room';
+    else if (this.racePick === 'room') return g.openHall();
+    else if (this.racePick) {
+      if (this.racePick === 'hall') g.net.leave();
+      this.racePick = null;
+      this.fromRoom = false;
+    }
+    this.renderTab('race');
+  }
+
+  // 告诉主程序背景该是缆车大厅还是展厅、展台上摆哪件装备；商城刚开完箱时，展台上试穿开出来的外观
   applyShow() {
     const s = SHOW[this.tab];
-    this.game.setShow(s ? s.label : null, this.tab === 'garage' ? this.viewGear : null);
+    let gear = null;
+    let patch = null;
+    if (this.tab === 'garage') gear = this.viewGear;
+    else if (this.tab === 'shop' && this.boxWin) {
+      const c = cosmeticOf(this.boxWin.key);
+      patch = { [c.slot]: c.i };
+    } else if (this.tab === 'shop') gear = this.shopPick();
+    this.game.setShow(s ? s.label : null, gear, patch);
   }
 
   // 展厅中间的空地：按住左右拖动，转动台上的角色
@@ -424,6 +297,60 @@ export class UI {
     el.addEventListener('pointercancel', end);
   }
 
+  // 车库的装备卡片栏：鼠标按住左右拖、滚轮横着滚；触屏直接用浏览器自带的横向滑动。
+  // 拖过一段再松手不算点击，不会误选到松手时鼠标底下的那张卡片
+  bindGearScroll(el) {
+    let drag = null; // { list, x, left, moved }
+    let dragged = false;
+    el.addEventListener('pointerdown', (e) => {
+      dragged = false;
+      const list = e.pointerType === 'mouse' && e.button === 0 && e.target.closest('.glist');
+      if (list) drag = { list, x: e.clientX, left: list.scrollLeft, moved: false };
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x;
+      if (!drag.moved) {
+        if (Math.abs(dx) < 6) return;
+        drag.moved = true;
+        drag.list.classList.add('drag');
+        // 鼠标拖出装备栏甚至拖出窗口，也继续跟着。抓不住（这根指针已经不在了）也不要紧，栏里照样能拖
+        try {
+          drag.list.setPointerCapture(e.pointerId);
+        } catch (err) {}
+      }
+      drag.list.scrollLeft = drag.left - dx;
+    });
+    const end = () => {
+      if (!drag) return;
+      dragged = drag.moved;
+      drag.list.classList.remove('drag');
+      drag = null;
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    el.addEventListener(
+      'click',
+      (e) => {
+        if (!dragged) return;
+        dragged = false;
+        e.stopPropagation();
+        e.preventDefault();
+      },
+      true
+    );
+    el.addEventListener(
+      'wheel',
+      (e) => {
+        const list = e.target.closest('.glist');
+        if (!list || list.scrollWidth <= list.clientWidth) return;
+        list.scrollLeft += e.deltaX || e.deltaY;
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+  }
+
   // 展厅页的骨架。head：{ badge, small, name, side, bar }；tags：[[文字, 样式]]；
   // extra：摆在中间的东西（车库的装备栏）；act：右下角的大按钮
   showHtml(tab, head, tags, body, extra = '', act = '', cls = '') {
@@ -443,13 +370,28 @@ export class UI {
     if (!el) return;
     // 重画后两栏各自回到原来的滚动位置
     const tops = [...el.querySelectorAll('.colBody')].map((b) => b.scrollTop);
+    const old = el.querySelector('.glist');
+    const oldLeft = old ? old.scrollLeft : 0;
     if (t === 'race') el.innerHTML = this.raceHtml();
     else if (t === 'growth') el.innerHTML = this.growthHtml();
     else if (t === 'garage') el.innerHTML = this.garageHtml();
+    else if (t === 'shop') el.innerHTML = this.shopHtml();
     else if (t === 'look') el.innerHTML = this.lookHtml();
-    else if (t === 'rules') el.innerHTML = this.rulesHtml();
     else if (t === 'set') el.innerHTML = this.settingsHtml();
+    if (t === this.tab) this.paintTop();
     el.querySelectorAll('.colBody').forEach((b, i) => (b.scrollTop = tops[i] || 0));
+    if (t === 'race') this.shapePlay(el);
+    const shelf = el.querySelector('.shelf');
+    if (shelf) this.spyShelf(shelf, true);
+    // 车库的装备栏：同一档里重画后留在原来拖到的位置，换了一档就回到最左边；
+    // 正在看的那张卡片要是露不全，就把它挪进来
+    const list = el.querySelector('.glist');
+    if (list) {
+      const left = old && old.dataset.rank === list.dataset.rank ? oldLeft : 0;
+      const on = list.querySelector('.on');
+      const pad = 12;
+      list.scrollLeft = on ? Math.max(on.offsetLeft + on.offsetWidth + pad - list.clientWidth, Math.min(on.offsetLeft - pad, left)) : left;
+    }
   }
 
   raceHtml() {
@@ -458,167 +400,37 @@ export class UI {
     const m = r.mode;
     const def = r.track !== 'random' ? TRACK_MAP[r.track] : null;
     // 首页：开始比赛走匹配。开房间里选玩法、赛道和机器人。赛道大厅单独铺开
-    const page = this.racePick === 'track' ? this.roomHtml(def) : this.racePick === 'room' ? this.customRoomHtml(def) : this.racePick === 'hall' ? this.hallHtml() : this.racePick === 'rank' ? this.rankHtml() : this.boardHtml() + `<section class="home">${this.homeHtml(def)}</section>`;
-    return page + (this.modeSel ? this.modeSelHtml(def) : '');
+    const page = this.racePick === 'track' ? this.roomHtml(def) : this.racePick === 'room' ? this.customRoomHtml(def) : this.racePick === 'hall' ? this.hallHtml() : this.racePick === 'rank' ? this.rankHtml() : `<div class="hside">${this.boardHtml()}${this.dailyCardHtml()}</div><section class="home">${this.homeHtml(def)}</section>`;
+    return page + (this.modeSel ? this.modeSelHtml() : '');
   }
 
-  // 首页左侧赛季榜。服务器上的选手，和本机刚打完还没上传的成绩，合成一份。
-  boardEntries() {
-    const g = this.game;
-    const P = g.profile;
-    const now = seasonNow();
-    const mine = P.data.season && P.data.season.id === now.id ? P.data.season : blankSeason(now.id);
-    const me = {
-      name: (g.account && g.account.username) || g.playerName || '游客',
-      title: P.data.title || '',
-      points: mine.points | 0,
-      hits: mine.hits | 0,
-      tt: mine.tt || 0,
-      ttTime: mine.ttTime || 0,
-      ttTrack: mine.ttTrack || '',
-      me: true,
-      jacket: g.look && g.look.jacket,
-    };
-    const rows = (this.boardRows || []).map((r) => (r.me ? { ...r, ...me, me: true } : r));
-    if (!rows.some((r) => r.me)) rows.push(me);
-    return rows;
-  }
-
-  boardRanked() {
-    const key = this.board;
-    let rows = this.boardEntries();
-    if (key === 'tt') rows = rows.filter((r) => r.tt > 0);
-    else rows = rows.filter((r) => (key === 'hits' ? r.hits : r.points) > 0 || r.me);
-    rows.sort((a, b) => {
-      if (key === 'tt') return a.tt - b.tt || a.ttTime - b.ttTime;
-      const d = key === 'hits' ? b.hits - a.hits : b.points - a.points;
-      return d || a.name.localeCompare(b.name, 'zh');
-    });
-    return rows.map((r, i) => ({ ...r, rank: i + 1 }));
-  }
-
-  boardScore(r) {
-    if (this.board === 'hits') return `${r.hits}`;
-    if (this.board === 'tt') {
-      const track = TRACK_MAP[r.ttTrack];
-      return `${fmtTime(r.ttTime)}<small>${track ? esc(track.name) : '固定赛道'}</small>`;
-    }
-    return `${r.points}`;
-  }
-
-  boardInner() {
-    const now = seasonNow();
-    if (this.boardRules) {
-      return `<header class="boardHead"><b>第 ${now.id} 赛季</b><small class="scd">${seasonLeftText(now.left)}</small></header>
-        <div class="boardRules">
-          <p><b>积分榜</b>每周一 0 点（北京时间）结算。只计「比赛」页的快速赛和联机赛：至少 4 人，难度为普通或困难，完赛才计分（淘汰赛出局也算）。名次分 ${POINTS.join(' / ')}，困难再 ×1.5 向下取整。简单、独自练习、排位赛、计时赛不计。</p>
-          <p><b>击飞榜</b>记的是上面这些比赛里，你击飞对手的次数。</p>
-          <p><b>计时榜</b>只计固定赛道的计时赛，比的是用时 ÷ 金牌时间，越小越靠前。随机赛道每局长度不一样，不进榜。</p>
-          <p><b>奖励</b>按积分榜名次，换季并连上服务器时发放：第 1 名 ❄${seasonReward(1)}，第 2–3 名 ❄${seasonReward(2)}，第 4–10 名 ❄${seasonReward(4)}，第 11–50 名 ❄${seasonReward(11)}。击飞榜和计时榜只排名。</p>
-        </div>
-        <div class="boardFoot"><button type="button" class="boardMore" data-act="boardRules">返回榜单</button></div>`;
-    }
-    const tabs = [['points', '积分'], ['hits', '击飞'], ['tt', '计时']]
-      .map(([id, name]) => `<button type="button" class="${id === this.board ? 'on' : ''}" data-act="board" data-id="${id}">${name}</button>`)
-      .join('');
-    const ranked = this.boardRanked();
-    const shown = this.boardFull ? ranked.slice(0, 30) : ranked.slice(0, 7);
-    const unit = this.board === 'hits' ? '次' : this.board === 'tt' ? '' : '分';
-    let list;
-    if (!shown.length) {
-      list = `<p class="boardEmpty">${this.board === 'tt' ? '本赛季还没有人在固定赛道上跑过计时赛。' : '打完一场计入规则的比赛，就会出现在这里。'}</p>`;
-    } else {
-      list = shown
-        .map((r) => {
-          const color = r.me && r.jacket != null ? hex(r.jacket) : boardColor(r.name);
-          const title = r.title ? `<small>${esc(r.title)}</small>` : '<small> </small>';
-          return `<div class="brow ${r.me ? 'me' : ''} ${r.rank <= 3 ? 'top' : ''}"><span class="brank">${r.rank}</span><span class="bav" style="background:${color}">${esc(r.name.slice(0, 1))}</span><span class="bmeta"><b>${esc(r.name)}</b>${title}</span><span class="bscore">${this.boardScore(r)}${unit ? `<i>${unit}</i>` : ''}</span></div>`;
-        })
-        .join('');
-    }
-    const more = ranked.length > 7 ? `<button type="button" class="boardMore" data-act="boardMore">${this.boardFull ? '收起榜单' : '查看完整排行榜'}</button>` : '';
-    return `<header class="boardHead"><b>第 ${now.id} 赛季</b><small class="scd">${seasonLeftText(now.left)}</small></header>
-      <div class="boardTabs">${tabs}</div>
-      <div class="boardList">${list}</div>
-      <div class="breward"><span>第1名 ❄${seasonReward(1)}</span><span>2–3 ❄${seasonReward(2)}</span><span>4–10 ❄${seasonReward(4)}</span><span>11–50 ❄${seasonReward(11)}</span></div>
-      <div class="boardFoot">${more}<button type="button" class="boardMore ghost" data-act="boardRules">上榜规则</button></div>`;
-  }
-
-  boardHtml() {
-    return `<section class="board panel">${this.boardInner()}</section>`;
-  }
-
-  patchBoard() {
-    const el = document.querySelector('#tab-race .board');
-    if (el) el.innerHTML = this.boardInner();
-  }
-
-  refreshBoard() {
-    if (this.boardJob) return this.boardJob;
-    this.boardJob = this._refreshBoard().finally(() => {
-      this.boardJob = null;
-    });
-    return this.boardJob;
-  }
-
-  async _refreshBoard() {
-    await this.settleSeason();
-    await this.loadBoard();
-  }
-
-  async settleSeason() {
-    const P = this.game.profile;
-    const now = seasonNow();
-    const s = P.data.season;
-    if (!s || !s.id || s.id >= now.id) {
-      if (s && !s.id) {
-        P.data.season = blankSeason(now.id);
-        P.save();
-      }
-      return;
-    }
-    if (!(s.points | 0)) {
-      P.data.season = blankSeason(now.id);
-      P.save();
-      return;
-    }
-    if (!this.game.account || !this.game.account.ready) return;
-    let rank = 0;
-    try {
-      if (this.game.account.dirty) await this.game.account.flush();
-      const data = await fetchLeaderboard(this.game.account.token, s.id);
-      const rows = (data.rows || []).filter((r) => r.points > 0).sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, 'zh'));
-      const i = rows.findIndex((r) => r.me);
-      rank = i >= 0 ? i + 1 : 0;
-    } catch {
-      return;
-    }
-    const coins = seasonReward(rank);
-    const old = s.id;
-    P.data.season = blankSeason(now.id);
-    if (coins) P.addCoins(coins);
-    P.save();
-    this.toast(coins ? `第 ${old} 赛季积分榜第 ${rank} 名，奖励 ❄${coins}` : `第 ${now.id} 赛季开始了`);
-  }
-
-  async loadBoard() {
-    const seq = (this.boardSeq = (this.boardSeq || 0) + 1);
-    let rows = null;
-    try {
-      const token = this.game.account && this.game.account.token;
-      const data = await fetchLeaderboard(token);
-      rows = data.rows || [];
-    } catch {
-      rows = null;
-    }
-    if (seq !== this.boardSeq) return;
-    this.boardRows = rows;
-    if (this.tab === 'race' && !this.racePick) this.patchBoard();
-  }
-
-  // 「设置」分页：机器人数量、难度、锦标赛轮数
+  // 「设置」页：一整块大面板，左边竖排分类，右边是这一类的选项（对局、道具、画面声音、操作、玩法说明）
   settingsHtml() {
-    return col('l', '对局设置', '', '<p class="note" style="margin-top:0">这些用于赛道大厅里直接开始的比赛。开房间的人数和玩法在房间列表里另设。首页「开始比赛」按玩法卡选的玩法分开匹配。</p>' + this.matchSettingsHtml());
+    const g = this.game;
+    const r = g.rules;
+    const cat = SET_CATS.some(([k]) => k === this.setCat) ? this.setCat : SET_CATS[0][0];
+    const nav = SET_CATS.map(([k, ic, name, en]) => `<button class="${k === cat ? 'on' : ''}" data-act="setCat" data-id="${k}"><span>${ic}</span><b>${name}</b><i>${en}</i></button>`).join('');
+    let body;
+    if (cat === 'match') {
+      body = this.matchSettingsHtml();
+    } else if (cat === 'items') {
+      const wp = WEAPON_KEYS.map((k) => `<button class="wp ${r.banned.includes(k) ? 'off' : ''}" data-ban="${k}">${WEAPONS[k].icon} ${WEAPONS[k].name}</button>`).join('');
+      body =
+        this.optRow('道具', 'items', [[true, '开启'], [false, '禁用道具（纯竞速）']], r.items) +
+        this.optRow('道具箱密度', 'itemRate', [[0, '稀少'], [1, '正常'], [2, '密集']], r.itemRate) +
+        this.optRow('野生动物袭击', 'wildlife', [[true, '开启'], [false, '关闭']], r.wildlife) +
+        `<div class="field"><label>武器池</label><div class="opts">${wp}</div></div>`;
+    } else if (cat === 'video') {
+      const m = !!g.sfx.muted;
+      body =
+        this.optRow('画质', 'quality', [['auto', '自动'], ['high', '高'], ['mid', '中'], ['low', '低']], r.quality || 'auto') +
+        this.optRow('实时阴影（卡顿时可关闭）', 'shadows', [[true, '开启'], [false, '关闭']], r.shadows) +
+        `<div class="field"><label>声音</label><div class="opts"><button class="${m ? '' : 'on'}" data-act="mute" data-v="0">开启</button><button class="${m ? 'on' : ''}" data-act="mute" data-v="1">静音</button></div></div>`;
+    } else if (cat === 'keys') body = KEYS_HTML;
+    else body = GUIDE_HTML;
+    const [, ic, name, en] = SET_CATS.find(([k]) => k === cat);
+    return `<section class="setp panel"><nav class="setnav">${nav}</nav>
+      <div class="setmain"><h3 class="sethead"><span>${ic}</span>${name}<i>${en}</i></h3><div class="setbody colBody">${body}</div></div></section>`;
   }
 
   matchSettingsHtml(forRoom) {
@@ -661,7 +473,8 @@ export class UI {
     this.onlineWait = wait;
   }
 
-  // 首页：开始比赛是匹配（大）· 玩法 / 开房间（中间两张）· 赛道（竖长）· 下面一排赛事和每日任务
+  // 首页一行卡片：开始比赛（同一个框里，这局玩什么、点了换玩法，右下大黄按钮去匹配）·
+  // 排位赛 / 开房间（中间两张）· 赛道
   homeHtml(def) {
     const g = this.game;
     const r = g.rules;
@@ -677,32 +490,39 @@ export class UI {
       const theme = r.theme === 'random' ? '随机场景' : THEMES[r.theme].name;
       trackCard = `<span class="hglow">🎲</span><b>随机生成</b><small>${theme}</small><em class="dim">${LENGTHS[r.length].name}</em>`;
     }
-    const tasks = P.dailyTasks();
-    const dots = tasks.map((t) => `<i class="${t.done ? 'on' : ''}"></i>`).join('');
-    return `<div class="hrow top">
-        <button class="hc hgo${this.queueing ? ' matching' : ''}" data-act="match"><span class="in">
-          <span class="hico">${this.queueing ? '⏳' : '⛷️'}</span>
-          <span class="htx"><b>${this.goTitle()}</b><small>${esc(this.goLine())}</small></span>
-          <span class="hthumb">${M.icon}</span>
-        </span></button>
+    // 匹配固定随机赛道、随机场景、最多 8 人；计时赛不匹配，跑的是赛道卡上选的那条
+    const sm = g.soloRules.mode;
+    const SM = MODES[sm] || M;
+    const st = MODE_STYLE[sm] || MODE_STYLE.race;
+    const solo = sm === 'tt';
+    const map = solo && def ? def.name : '随机赛道';
+    const scene = solo && def ? THEMES[def.theme].name : solo && r.theme !== 'random' ? THEMES[r.theme].name : '随机场景';
+    const chips = (solo ? ['单人', scene] : ['8 人', scene]).map((t) => `<i>${t}</i>`).join('');
+    return `<div class="hc hplay" style="--c1:${st.c[0]};--c2:${st.c[1]}">
+          <button class="hpick" data-act="msel" title="换一个玩法"><svg class="hpline" aria-hidden="true"><path></path></svg><span class="in">
+            <span class="hart">${SM.icon}</span>
+            <span class="hpinfo"><span class="hmap"><b>${esc(map)}</b>${chips}</span><strong>${SM.name}</strong></span>
+            <span class="hswap">⇄</span>
+          </span></button>
+          <button class="hready${this.queueing ? ' matching' : ''}" data-act="match"><span class="in"><b>${this.goTitle()}</b></span></button>
+        </div>
         <div class="hmid">
-          <button class="hc hmode" data-act="msel"><span class="in">
-            <span class="hico sm">${M.icon}</span><span class="htx"><b>${M.name}</b><small>玩法模式</small></span><span class="hmore">›</span>
+          <button class="hc hrank${P.rankOpen() ? '' : ' lock'}" data-act="ranked"><span class="in">
+            <span class="hico sm">🏅</span><span class="htx"><b>排位赛</b><small>${P.rankOpen() ? esc(P.rankView().line) : `Lv.${RANK_LV} 开启`}</small></span><span class="hmore">›</span>
           </span></button>
           <button class="hc hnet" data-act="hall">
             <span class="in"><span class="hico sm">🏠</span><span class="htx"><b>开房间</b></span><span class="hmore">›</span></span>
           </button>
         </div>
-        <button class="hc htrack" data-act="pick" data-id="track"><span class="in"><span class="hlbl">赛道 · 场景</span>${trackCard}</span></button>
-      </div>
-      <div class="hrow bot">
-        <button class="hc hev${P.rankOpen() ? '' : ' lock'}" data-act="ranked"><span class="in">
-          <span class="hsq">🏅</span><span class="htx"><small class="${P.rankOpen() ? '' : 'hot'}">${P.rankOpen() ? esc(P.rankView().line) : `Lv.${RANK_LV} 开启`}</small><b>排位赛</b></span><span class="hmore">›</span>
-        </span></button>
-        <button class="hc hdaily" data-act="quest"><span class="in">
-          <span class="hsq blue">📋</span><span class="htx"><b>每日任务</b><span class="hdots">${dots}</span><small class="cd">${this.dailyLeft()}</small></span>
-        </span></button>
-      </div>`;
+        <button class="hc htrack" data-act="pick" data-id="track"><span class="in"><span class="hlbl">赛道 · 场景</span>${trackCard}</span></button>`;
+  }
+
+  // 每日任务：放在左边赛季榜下面
+  dailyCardHtml() {
+    const dots = this.game.profile.dailyTasks().map((t) => `<i class="${t.done ? 'on' : ''}"></i>`).join('');
+    return `<button class="hc hdaily" data-act="quest"><span class="in">
+        <span class="hsq blue">📋</span><span class="htx"><b>每日任务</b><span class="hdots">${dots}</span><small class="cd">${this.dailyLeft()}</small></span>
+      </span></button>`;
   }
 
   // 离每日任务刷新（本地零点）还有多久
@@ -740,16 +560,14 @@ export class UI {
       cards = (cat === 'all' ? this.randCardHtml(null) : '') + list.map((t) => this.trackCardHtml(t)).join('');
     }
     return `<section class="room">
-      <nav class="rnav"><header><b>赛道大厅</b><small>TRACKS</small></header>${nav}</nav>
+      <nav class="rnav">${nav}</nav>
       <div class="rbar">${this.roomBarHtml(def)}</div>
       <div class="rgrid colBody">${cards}</div>
       <div class="ract">
         ${this.fromRoom
-          ? `<button class="rbtn back" data-act="roomBack"><b>‹ 返回</b><small>回到房间</small></button>
-             <span class="rtip">选中的卡片再点一次，就带着它回到房间</span>
+          ? `<span class="rtip">选中的卡片再点一次，就带着它回到房间</span>
              <button class="rbtn main" data-act="quick"><b>用这条开始</b><small>${M.icon} ${M.name}</small></button>`
-          : `<button class="rbtn back" data-act="pick" data-id=""><b>‹ 返回</b><small>回到首页</small></button>
-             <span class="rtip">选中的卡片再点一次，按当前玩法直接出发</span>
+          : `<span class="rtip">选中的卡片再点一次，按当前玩法直接出发</span>
              <button class="rbtn" data-act="hall"><b>开房间</b><small>房间列表</small></button>
              <button class="rbtn main" data-act="quick"><b>开始这场</b><small>${M.icon} ${M.name}</small></button>`}
       </div>
@@ -819,10 +637,9 @@ export class UI {
       ? list.map((r) => this.hallCard(r)).join('')
       : '<div class="hallEmpty">还没有人开房<br><small>创建一个，别人就能从这里进来</small></div>';
     return `<section class="room hall">
-      <div class="hallBar"><b>房间</b><div class="opts">${filters}</div></div>
+      <div class="hallBar"><div class="opts">${filters}</div></div>
       <div class="hallGrid">${cards}</div>
       <div class="ract">
-        <button class="rbtn back" data-act="pick" data-id=""><b>‹ 返回</b><small>回到首页</small></button>
         <button class="rbtn" data-act="qroom"><b>快速进房</b><small>${mode === 'all' ? '随便进一间' : MODES[mode].name}</small></button>
         <button class="rbtn main" data-act="pick" data-id="room"><b>创建房间</b><small>自己定玩法和赛道</small></button>
       </div>
@@ -866,22 +683,19 @@ export class UI {
     }
     return `<section class="room setup">
       <div class="sheet panel">
-        <header class="shead"><div class="sbadge">🏠</div><div class="sname"><small>自己定规则，马上开赛</small><b>开房间</b></div></header>
         <div class="field"><label>玩法</label><div class="opts">${modes}</div></div>
         <button class="roomMap" data-act="pick" data-id="track"><span><b>${esc(where)}</b><small>${esc(sub)}</small></span><em>选赛道 ›</em></button>
         ${this.matchSettingsHtml(true)}
       </div>
       <div class="ract">
-        <button class="rbtn back" data-act="hall"><b>‹ 返回</b><small>房间列表</small></button>
         <button class="rbtn main" data-act="mkroom"><b>创建</b><small>${M.icon} ${M.name}</small></button>
       </div>
     </section>`;
   }
 
   // 模式选择：一排斜切大卡片。选完回到刚才的页面
-  modeSelHtml(def) {
+  modeSelHtml() {
     const r = this.game.rules;
-    const go = this.modeSel.go;
     const cards = MODE_KEYS.map((k, i) => {
       const M = MODES[k];
       const s = MODE_STYLE[k];
@@ -894,11 +708,9 @@ export class UI {
           <span class="mdesc">${M.desc}</span>
         </span></button>`;
     }).join('');
-    const where = def ? def.name : '随机赛道';
     return `<div class="msel">
-      <div class="mhead"><b><i>›››</i>模式选择</b><small>${go ? `${esc(where)} · 选好玩法就直接出发` : '换一个玩法，回到首页再出发'}</small></div>
+      <header class="ptop">${pageTop('模式选择', this.game.profile.coins)}</header>
       <div class="mrow">${cards}</div>
-      <div class="mfoot"><button class="rbtn back" data-act="msel-close"><b>‹ 返回</b><small>Esc</small></button></div>
     </div>`;
   }
 
@@ -911,14 +723,27 @@ export class UI {
     const matching = !!this.queueing && g.rankMode;
     const go = matching ? '取消匹配' : '开始匹配';
     return `<section class="rank">
-      <header class="rankHead"><div><small>排位赛</small><b>${esc(view.name)}${view.star ? ' ' + view.star : ''}</b></div><em>${view.pts} 分 · ${esc(view.next)}<br>${view.wins} 胜 / ${view.games} 场</em></header>
+      <header class="rankHead"><div><b>${esc(view.name)}${view.star ? ' ' + view.star : ''}</b></div><em>${view.pts} 分 · ${esc(view.next)}<br>${view.wins} 胜 / ${view.games} 场</em></header>
+      ${this.ladderHtml(view.pts)}
       <div class="rankModes">${modes}</div>
-      <p class="note">${esc(cur.blurb)} 单人排队，人不够时由机器人补齐。青铜段位失败不扣分。三种玩法共用这一套段位，新赛季保留七成积分。</p>
+      <p class="note">${esc(cur.blurb)} 单人排队，人不够时由机器人补齐。青铜段位失败不扣分。三种玩法共用这一套段位。段位赛季 4 周一换，换季保留七成积分。</p>
       <div class="ract">
-        <button class="rbtn back" data-act="pick" data-id=""><b>‹ 返回</b><small>回到首页</small></button>
         <button class="rbtn main" data-act="rankGo" data-id="${cur.id}"><b id="rankWait">${matching ? `匹配中 ${esc(this.queueLine || '00:00')}` : go}</b><small>${matching ? '再点一次取消' : cur.name}</small></button>
       </div>
     </section>`;
+  }
+
+  // 段位阶梯：七档从左往右一级比一级高，走过的亮着，当前这档挂「你在这里」，往上的灰着
+  ladderHtml(pts) {
+    const t = tierAt(pts);
+    const steps = TIERS.map((T, i) => {
+      const state = i < t.index ? 'past' : i === t.index ? 'cur' : '';
+      const next = TIERS[i + 1];
+      const p = i < t.index ? 100 : i > t.index ? 0 : next ? Math.round((t.into / t.span) * 100) : 100;
+      return `<div class="rstep t${i} ${state}" style="--h:${36 + i * 6}px">${state === 'cur' ? '<em>你在这里</em>' : ''}<span class="ric">${TIER_ICONS[i]}</span>
+        <div class="rblk"><b>${T.name}</b><small>${T.min}${next ? '' : '+'}</small><i style="--p:${p}%"></i></div></div>`;
+    }).join('');
+    return `<div class="rladder">${steps}</div>`;
   }
 
   // 成长页：内容在 quest.js 里（总览 / 成就 / 生涯）
@@ -943,19 +768,7 @@ export class UI {
     let body;
     const rare = RARITY[G.rarity] || RARITY.C;
     if (sub === 'up') {
-      const costNote = rare.up > 1 ? `，${rare.name}装备花费 ×${rare.up}` : '';
-      body = `<div class="ssec">强化<small>每条最多 ${UP_MAX} 级，只作用于这一件装备${costNote}</small></div>`;
-      for (const k of UP_KEYS) {
-        const U = UPGRADES[k];
-        const lv = up[k];
-        const cost = P.upgradeCost(id, k);
-        const pips = Array.from({ length: UP_MAX }, (_, i) => `<i class="${i < lv ? 'on' : ''}"></i>`).join('');
-        let btn;
-        if (!owned) btn = '<span class="tag lock">🔒 未拥有</span>';
-        else if (lv >= UP_MAX) btn = '<span class="tag on">已满级</span>';
-        else btn = `<button class="btn sm ${P.coins < cost ? 'poor' : ''}" data-act="up" data-line="${k}">强化 ❄${cost}</button>`;
-        body += `<div class="uprow"><div class="un"><b>${U.name}</b><small>${U.desc}</small></div><div class="pips">${pips}</div>${btn}</div>`;
-      }
+      body = tuneHtml(P, id, owned, this.upPlan, this.upSel);
     } else {
       const s = gearStats(id, up);
       const bars = STAT_KEYS.map((k) => {
@@ -965,24 +778,37 @@ export class UI {
       }).join('');
       body =
         `<div class="ssec">装备特性</div><div class="strait r${G.rarity || 'C'}"><span class="ic">${G.icon}</span><p>${G.desc}</p></div>` +
-        `<div class="ssec">属性<small>会真实影响手感；绿色是强化加成</small></div><div class="gcard">${bars}</div>`;
+        `<div class="ssec">属性<small>会真实影响手感；绿色是改装加成</small></div><div class="gcard">${bars}</div>`;
     }
-    // 中间下方：先选稀有度，再换这一档里的装备
+    // 中间下方：先选稀有度，下面一排这一档的装备卡片（装备的缩略图 + 名字 + 稀有度），可以左右拖
     const rank = RARITY[this.gearRank] ? this.gearRank : G.rarity || 'C';
-    const chips = RARITY_KEYS.map((k) => `<button class="grank r${k} ${k === rank ? 'on' : ''}" data-act="rank" data-id="${k}"><b>${k}</b><i>${RARITY[k].name}</i></button>`).join('');
+    const chips = RARITY_KEYS.map((k) => {
+      const all = GEAR_KEYS.filter((x) => (GEAR[x].rarity || 'C') === k);
+      const got = all.filter((x) => P.gearOwned(x)).length;
+      return `<button class="grank r${k} ${k === rank ? 'on' : ''}" data-act="rank" data-id="${k}"><b>${k}</b><i>${RARITY[k].name}</i><u>${got}/${all.length}</u></button>`;
+    }).join('');
+    // 缩略图只在车库页开着的时候拍；拍不出来就用图标顶上
+    const shots = this.tab === 'garage';
     const pick = GEAR_KEYS.filter((k) => (GEAR[k].rarity || 'C') === rank)
       .map((k) => {
+        const K = GEAR[k];
         const has = P.gearOwned(k);
-        const mark = k === cur ? '<em>使用中</em>' : has ? '' : '<em class="no">🔒</em>';
-        return `<button class="r${GEAR[k].rarity} ${k === id ? 'on' : ''} ${has ? '' : 'lock'}" data-act="view" data-id="${k}"><span class="rk">${GEAR[k].rarity}</span><span class="ic">${GEAR[k].icon}</span><b>${GEAR[k].name}</b>${mark}</button>`;
+        const mark = k === cur ? '<em>使用中</em>' : has ? '' : `<em class="no">${K.unlock && K.unlock.shop ? '🛒' : '🔒'}</em>`;
+        const upN = has ? UP_KEYS.reduce((n, u) => n + P.up(k)[u], 0) : 0;
+        const img = shots ? gearThumb(k, g.look) : null;
+        const pic = img ? `<img src="${img}" alt="" draggable="false">` : `<span class="ic">${K.icon}</span>`;
+        return `<button class="r${K.rarity} ${k === id ? 'on' : ''} ${has ? '' : 'lock'}" data-act="view" data-id="${k}"><span class="pic">${pic}</span><span class="nm"><b>${K.name}</b><i>${RARITY[K.rarity].name}</i></span>${mark}${upN ? `<span class="gup">+${upN}</span>` : ''}</button>`;
       })
       .join('');
-    // 右下角：左边在属性 / 强化之间切换，右边按状态是 选用 / 购买 / 未解锁
-    let act = sub === 'up' ? '<button class="sbtn" data-sub="attr"><b>属性</b><i>PROPERTY</i></button>' : '<button class="sbtn" data-sub="up"><b>强化</b><i>UPGRADE</i></button>';
+    // 右下角：左边在属性 / 改装之间切换，右边按状态是 选用 / 购买 / 未解锁
+    let act = sub === 'up' ? '<button class="sbtn" data-sub="attr"><b>属性</b><i>PROPERTY</i></button>' : '<button class="sbtn" data-sub="up"><b>改装</b><i>TUNING</i></button>';
     let state;
     if (owned) {
       state = id === cur ? '使用中' : '已拥有';
       act += id === cur ? '<button class="sbtn main off" disabled><b>使用中</b><i>EQUIPPED</i></button>' : `<button class="sbtn main" data-k="look.gear" data-v="${id}"><b>选用</b><i>EQUIP</i></button>`;
+    } else if (G.unlock.shop) {
+      state = '商城有售';
+      act += `<button class="sbtn main" data-act="toShop" data-id="${id}"><b>去商城</b><i>❄ ${G.unlock.cost}</i></button>`;
     } else if (st === 'buy') {
       const cost = G.unlock.cost;
       const confirm = this.pendingBuy === key;
@@ -993,15 +819,15 @@ export class UI {
       state = '未解锁';
       act += `<button class="sbtn main off" data-act="locked" data-why="${esc(why)}"><b>未解锁</b><i>${G.unlock.lv ? `Lv.${G.unlock.lv}` : 'LOCKED'}</i></button>`;
     }
-    const head = { badge: G.icon, small: `${G.rarity} · ${rare.name} · ${state}`, name: G.name, side: `强化 <b>${upSum}</b> / ${UP_KEYS.length * UP_MAX}` };
-    return this.showHtml('garage', head, gearTags(G), body, `<div class="spick"><div class="granks">${chips}</div><div class="glist">${pick}</div></div>`, act);
+    const head = { badge: G.icon, small: `${G.rarity} · ${rare.name} · ${state}`, name: G.name, side: `改装 <b>${upSum}</b> / ${UP_KEYS.length * UP_MAX}` };
+    return this.showHtml('garage', head, gearTags(G), body, `<div class="spick gpick"><div class="granks">${chips}</div><div class="glist" data-rank="${rank}" title="按住左右拖动，可以翻看更多装备">${pick}</div></div>`, act);
   }
 
   lookHtml() {
     const g = this.game;
     const L = g.look;
     const sw = (list) => list.map((c) => [c, '', `background:${hex(c)}`]);
-    const lockNote = '<p class="note">🔒 的部件升级或达成成就后解锁；标着 ❄ 的用雪花币购买（点两下确认）。</p>';
+    const lockNote = '<p class="note">🔒 的部件升级或达成成就后解锁；标着 ❄ 的用雪花币购买（点两下确认）。不少部件也能在「商城」的雪花补给箱里提前开到。</p>';
     const sub = this.sub.look;
     let body;
     if (sub === 'color') {
@@ -1038,18 +864,6 @@ export class UI {
     return this.showHtml('look', head, tags, body);
   }
 
-  rulesHtml() {
-    const r = this.game.rules;
-    const wp = WEAPON_KEYS.map((k) => `<button class="wp ${r.banned.includes(k) ? 'off' : ''}" data-ban="${k}">${WEAPONS[k].icon} ${WEAPONS[k].name}</button>`).join('');
-    const set =
-      '<p class="note" style="margin-top:0">这里的道具和野生动物用于赛道大厅里直接开始的比赛。开房间和匹配的道具跟着玩法走，排位有固定的规则。竞速赛、特技赛、计时赛不刷道具。</p>' +
-      this.optRow('道具', 'items', [[true, '开启'], [false, '禁用道具（纯竞速）']], r.items) +
-      this.optRow('道具箱密度', 'itemRate', [[0, '稀少'], [1, '正常'], [2, '密集']], r.itemRate) +
-      this.optRow('野生动物袭击', 'wildlife', [[true, '开启'], [false, '关闭']], r.wildlife) +
-      this.optRow('实时阴影（卡顿时可关闭）', 'shadows', [[true, '开启'], [false, '关闭']], r.shadows);
-    return col('l', '快速赛规则', '', set) + col('r', '武器池', '点击禁用 / 启用单个武器', `<div class="opts">${wp}</div>`);
-  }
-
   onMenuClick(e) {
     const g = this.game;
     const P = g.profile;
@@ -1065,12 +879,14 @@ export class UI {
       this.toast(b.dataset.why || '还没解锁', true);
       return;
     }
+    if (act === 'back') return this.back();
     // 展厅页左边的子页签（车库右下角的 属性 / 强化 按钮也走这里）
     if (b.dataset.sub) {
       this.pendingBuy = null;
       this.sub[this.tab] = b.dataset.sub;
       for (const x of $('tab-' + this.tab).querySelectorAll('.colBody')) x.scrollTop = 0;
       this.renderTab(this.tab);
+      this.applyShow();
       return;
     }
     // 车库：换一档稀有度，展台跟着换成这一档的第一件
@@ -1086,9 +902,81 @@ export class UI {
     // 车库：换一件装备摆上展台看看
     if (act === 'view') {
       this.pendingBuy = null;
+      this.upSel = null;
       this.viewGear = b.dataset.id;
       this.gearRank = (GEAR[b.dataset.id] && GEAR[b.dataset.id].rarity) || 'C';
       this.renderTab('garage');
+      this.applyShow();
+      return;
+    }
+    // 商城：换一件商品摆上展台看看
+    if (act === 'sview') {
+      this.pendingBuy = null;
+      this.boxWin = null;
+      this.boxFx = false;
+      this.shopGear = b.dataset.id;
+      this.renderTab('shop');
+      this.applyShow();
+      return;
+    }
+    // 商城：左边目录，把货架滚到那一区
+    if (act === 'ssec') {
+      this.shopSec = b.dataset.id;
+      for (const x of b.parentElement.children) x.classList.toggle('on', x === b);
+      this.scrollShelf($('tab-shop').querySelector(`.shsec[data-sec="${b.dataset.id}"]`));
+      return;
+    }
+    // 车库和商城之间互相跳，过去之后直接看这件装备
+    if (act === 'toShop' || act === 'toGarage') {
+      const id = b.dataset.id;
+      if (!GEAR[id]) return;
+      this.openTab(act === 'toShop' ? 'shop' : 'garage');
+      if (act === 'toShop') this.shopGear = id;
+      else {
+        this.viewGear = id;
+        this.gearRank = GEAR[id].rarity || 'C';
+      }
+      this.renderTab(this.tab);
+      this.applyShow();
+      if (act === 'toShop') this.scrollShelf($('tab-shop').querySelector('.scard.on'), true);
+      return;
+    }
+    // 补给箱：第一次点变成确认，开出结果之后「再开一次」直接开
+    if (act === 'box') {
+      if (P.coins < BOX_COST) {
+        this.toast(`雪花币不够（需要 ❄${BOX_COST}，你有 ❄${P.coins}）`, true);
+        return;
+      }
+      if (!this.boxWin && this.pendingBuy !== 'box') {
+        this.pendingBuy = 'box';
+        this.renderTab('shop');
+        return;
+      }
+      this.pendingBuy = null;
+      const win = P.openBox();
+      if (!win) return;
+      this.boxWin = win;
+      this.boxFx = true;
+      this.refreshProfile();
+      this.renderTab('shop');
+      this.applyShow();
+      return;
+    }
+    // 收下：关掉全屏演出，回到商城，展台上继续试穿、详情条上还能再决定戴不戴
+    if (act === 'boxFxOk') {
+      this.boxFx = false;
+      this.renderTab('shop');
+      return;
+    }
+    if (act === 'boxWear' || act === 'boxOk') {
+      if (act === 'boxWear' && this.boxWin) {
+        const c = cosmeticOf(this.boxWin.key);
+        g.setLook(c.slot, c.i);
+        this.toast(`已佩戴「${c.name}」`);
+      }
+      this.boxWin = null;
+      this.boxFx = false;
+      this.renderTab('shop');
       this.applyShow();
       return;
     }
@@ -1137,9 +1025,6 @@ export class UI {
       this.patchBoard();
       return;
     }
-    if (act === 'hall' || act === 'pick' || act === 'msel' || act === 'quest' || act === 'tab' || act === 'ranked') {
-      if (g.netMode && !g.customRoom && g.state === 'menu' && act !== 'rankGo') g.leavePublicQueue();
-    }
     if (act === 'ranked') {
       if (!g.profile.rankOpen()) return this.toast(`排位赛 Lv.${RANK_LV} 开启`, true);
       this.racePick = 'rank';
@@ -1147,7 +1032,8 @@ export class UI {
       return;
     }
     if (act === 'rankMode') {
-      if (g.netMode && !g.customRoom) g.leavePublicQueue();
+      // 正在排的是排位：换一种排位就退出当前队列；排的是普通匹配就不动它
+      if (g.netMode && !g.customRoom && g.rankMode) g.leavePublicQueue();
       this.rankMode = b.dataset.id || 'solo';
       this.renderTab('race');
       return;
@@ -1166,11 +1052,6 @@ export class UI {
     }
     if (act === 'tab') return this.openTab(b.dataset.id);
     if (act === 'quest') return this.quest.open();
-    if (act === 'roomBack') {
-      this.racePick = 'room';
-      this.renderTab('race');
-      return;
-    }
     if (act === 'pick') {
       const id = b.dataset.id || null;
       if (id === 'track') this.fromRoom = this.racePick === 'room';
@@ -1182,14 +1063,18 @@ export class UI {
       this.renderTab('race');
       return;
     }
-    if (act === 'msel' || act === 'msel-close') {
-      this.modeSel = act === 'msel' ? { go: !!b.dataset.go } : null;
+    if (act === 'msel') {
+      this.modeSel = { go: !!b.dataset.go };
       this.renderTab('race');
       return;
     }
     if (act === 'mode') {
       const go = this.modeSel && this.modeSel.go;
       this.modeSel = null;
+      if (this.queueing && g.rules.mode !== b.dataset.id) {
+        this.renderTab('race');
+        return this.toast('匹配中不能换玩法，先取消匹配', true);
+      }
       if (g.rules.mode !== b.dataset.id) g.setRule('mode', b.dataset.id);
       else this.renderTab('race');
       if (go) g.startTournament();
@@ -1227,18 +1112,54 @@ export class UI {
       this.renderTab('growth');
       return;
     }
-    if (act === 'up') {
+    if (act === 'setCat') {
+      this.setCat = b.dataset.id;
+      this.renderTab('set');
+      const body = $('tab-set').querySelector('.setbody');
+      if (body) body.scrollTop = 0;
+      return;
+    }
+    if (act === 'mute') {
+      g.sfx.setMuted(b.dataset.v === '1');
+      this.renderTab('set');
+      return;
+    }
+    if (act === 'achCat' || act === 'ach' || act === 'achClose') {
+      if (act === 'achCat') this.achCat = b.dataset.id;
+      this.achSel = act === 'ach' ? b.dataset.id : null;
+      this.renderTab('growth');
+      return;
+    }
+    // 改装树：点节点是选中它，推荐路线换了就从新路线上下一个能改的节点开始
+    if (act === 'upNode' || act === 'upPlan') {
+      if (act === 'upNode') this.upSel = b.dataset.line;
+      else {
+        this.upPlan = b.dataset.id;
+        this.upSel = null;
+      }
+      this.renderTab('garage');
+      return;
+    }
+    if (act === 'up' || act === 'upFull') {
       const line = b.dataset.line;
-      // 强化的是展台上正在看的那件装备
+      // 改的是展台上正在看的那件装备
       const gear = GEAR[this.viewGear] ? this.viewGear : g.look.gear;
-      const cost = P.upgradeCost(gear, line);
-      if (P.coins < cost) {
-        this.toast(`雪花币不够（需要 ❄${cost}，你有 ❄${P.coins}）`, true);
+      const cost = act === 'up' ? P.upgradeCost(gear, line) : P.upgradeFullCost(gear, line);
+      if (P.parts < cost) {
+        this.toast(`改装币不够（需要 ${cost}，你有 ${P.parts}）`, true);
         return;
       }
-      if (P.upgrade(gear, line)) {
+      let n = 0;
+      while (P.upgrade(gear, line)) {
+        n++;
+        if (act === 'up') break;
+      }
+      if (n) {
         const ach = P.checkAch();
-        this.toast(`${UPGRADES[line].name} 升到 ${P.up(gear)[line]} 级！${ach.length ? ` 🏆 达成成就「${ach.map((a) => a.name).join('」「')}」` : ''}`);
+        const lv = P.up(gear)[line];
+        this.toast(`${UPGRADES[line].name} ${lv >= UP_MAX ? '已改满' : `升到 ${lv} 级`}！${ach.length ? ` 🏆 达成成就「${ach.map((a) => a.name).join('」「')}」` : ''}`);
+        // 这个节点改满了，就跳到推荐路线上下一个
+        if (lv >= UP_MAX) this.upSel = null;
         this.refreshProfile();
         this.renderTab('garage');
       }
@@ -1253,7 +1174,7 @@ export class UI {
     const k = b.dataset.k;
     if (k.startsWith('look.')) {
       g.setLook(k.slice(5), v);
-      if (k === 'look.gear') this.renderTab('garage');
+      if (k === 'look.gear') this.renderTab(this.tab === 'shop' ? 'shop' : 'garage');
       if (this.tab === 'look' && this.pendingBuy === null) this.renderTab('look');
     } else {
       g.setRule(k, v);
@@ -1281,6 +1202,7 @@ export class UI {
       `<span class="lv">Lv.${info.lv}</span>${P.data.title ? `<span class="ttl">${esc(P.data.title)}</span>` : ''}` +
       `<div class="xpbar"><i style="width:${pct}%"></i></div><span class="xp">${info.need ? `${info.cur}/${info.need}` : 'MAX'}</span>` +
       `<span class="coin">❄ ${P.coins}</span>`;
+    this.paintTop();
   }
 
   showMenu(b) {
@@ -1297,8 +1219,10 @@ export class UI {
     let t = 0;
     let r = W;
     let b = H;
-    if (!$('match').classList.contains('hidden')) l = $('matchBox').getBoundingClientRect().right;
-    else if (!$('menu').classList.contains('hidden')) {
+    if (!$('match').classList.contains('hidden')) {
+      l = $('matchBox').getBoundingClientRect().right;
+      t = $('matchTop').getBoundingClientRect().bottom;
+    } else if (!$('menu').classList.contains('hidden')) {
       // 赛道大厅铺满了整个大厅，背后的镜头停在原处，退回首页时不用再挪
       if (this.tab === 'race' && (this.racePick === 'track' || this.racePick === 'room' || this.racePick === 'hall' || this.racePick === 'rank')) return this.frame || FULL_FRAME;
       const m = $('menuMid').getBoundingClientRect();
@@ -1349,315 +1273,6 @@ export class UI {
     f.h = (b - t) / H;
     return f;
   }
-  showHud(b) {
-    $('hud').classList.toggle('hidden', !b);
-  }
-  // online：联机比赛中，只是打开菜单，比赛不会停，也不能重开
-  showPause(b, online = false) {
-    $('pause').classList.toggle('hidden', !b);
-    if (!b) return;
-    $('pauseTitle').textContent = online ? '菜单' : '暂停';
-    $('pauseNote').classList.toggle('hidden', !online);
-    $('btnRestart').classList.toggle('hidden', online);
-    $('btnQuit').textContent = online ? '退出比赛，返回大厅' : '返回大厅';
-  }
-  hideResults() {
-    $('results').classList.add('hidden');
-  }
-
-  roundText() {
-    const g = this.game;
-    if (g.net.active) {
-      const where = THEMES[g.themeKey].name;
-      const spec = g.session.kind === 'rank' ? RANK_MAP[g.session.rank] : null;
-      if (spec) return `${spec.icon} ${spec.name} · ${where}`;
-      const m = MODES[g.mode.key];
-      return `${m ? `${m.icon} ${m.name}` : '联机'} · ${where}`;
-    }
-    const s = g.session;
-    const where = g.trackDef ? g.trackDef.name : THEMES[g.themeKey].name;
-    const m = MODES[g.mode.key];
-    return `${m.icon} ${m.name} · ${where}${g.rules.rounds > 1 ? ` · 第 ${g.round} / ${g.rules.rounds} 轮` : ''}`;
-  }
-
-  resetHud() {
-    const g = this.game;
-    $('feed').innerHTML = '';
-    this.feedItems = [];
-    $('banner').className = 'stroke';
-    $('tip').className = 'stroke';
-    $('count').textContent = '';
-    $('posTotal').textContent = '/' + g.racers.length;
-    $('pos').classList.toggle('hidden', g.racers.length < 2);
-    $('round').textContent = this.roundText();
-    const p = $('progress');
-    p.innerHTML = '';
-    this.dots = g.racers.map((r) => {
-      const d = document.createElement('div');
-      d.className = 'dot' + (r.isPlayer ? ' me' : '');
-      d.style.background = hex(r.look.jacket);
-      if (r.team >= 0 && !r.isPlayer) d.style.borderColor = TEAM_COLORS[r.team];
-      p.appendChild(d);
-      return d;
-    });
-    this.lastItem = undefined;
-    this.rankT = 0;
-    this.popT = 0;
-    $('trickPop').classList.remove('show');
-    this.chainOn = false;
-    $('chain').classList.add('hidden');
-    this.lastModeHtml = null;
-    $('modeBox').classList.add('hidden');
-    this.hideImpact();
-    $('item').classList.toggle('hidden', !g.rules.items);
-  }
-
-  showImpact(name, cause, frozen) {
-    const el = $('impact');
-    el.classList.remove('hidden');
-    const verb = frozen ? '冻住' : '命中';
-    $('impactWho').textContent = `${verb} ${name}`;
-    $('impactCause').textContent = cause || '';
-  }
-
-  hideImpact() {
-    $('impact').classList.add('hidden');
-  }
-
-  // 自己被冻住时，屏幕四周结一圈霜
-  setFrost(on) {
-    if (on === !!this.frostOn) return;
-    this.frostOn = on;
-    if (!this.frostEl) {
-      const el = (this.frostEl = document.createElement('div'));
-      el.style.cssText =
-        'position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .18s;' +
-        'background:radial-gradient(ellipse at center,rgba(150,220,255,0) 42%,rgba(140,215,255,.5) 78%,rgba(225,247,255,.92) 100%);' +
-        'box-shadow:inset 0 0 90px 30px rgba(215,244,255,.75);';
-      $('hud').insertBefore(el, $('hud').firstChild);
-    }
-    this.frostEl.style.opacity = on ? '1' : '0';
-  }
-
-  setCount(text) {
-    const c = $('count');
-    if (c.textContent === text) return;
-    c.textContent = text;
-    c.classList.remove('pop');
-    void c.offsetWidth;
-    c.classList.add('pop');
-  }
-
-  banner(text, kind = '', dur = 1.6) {
-    const b = $('banner');
-    b.textContent = text;
-    b.className = 'stroke ' + kind;
-    void b.offsetWidth;
-    b.classList.add('show');
-    this.bannerT = dur;
-  }
-
-  tip(text, dur = 1.8) {
-    const t = $('tip');
-    t.textContent = text;
-    t.classList.add('show');
-    this.tipT = dur;
-  }
-
-  // 技巧链结算 / 中断弹字。kind：good / gold / bad
-  chainPop(title, value, kind = 'good') {
-    const el = $('trickPop');
-    el.innerHTML = `<div class="t">${esc(title)}</div><div class="v">${esc(value)}</div>`;
-    el.className = 'stroke ' + kind;
-    void el.offsetWidth;
-    el.classList.add('show');
-    this.popT = 1.5;
-  }
-
-  // 技巧链面板：内容变了才重画，倒计时条每帧走
-  updateChain(p) {
-    const ch = p.chain;
-    // 空中正在做的动作（还没落地，不算分）
-    let air = '';
-    if (!p.grounded && p.state === 'ski') {
-      const deg = (a) => Math.round(Math.abs(a) * 18 / Math.PI) * 10;
-      const parts = [];
-      if (Math.abs(p.flip) > 0.3) parts.push(`${p.flip > 0 ? '后空翻' : '前空翻'} ${deg(p.flip)}°`);
-      if (Math.abs(p.spinA) > 0.3) parts.push(`转体 ${deg(p.spinA)}°`);
-      if (p.grabT > 0.05) parts.push(`抓板 ${p.grabT.toFixed(1)}s`);
-      air = parts.join(' · ');
-    }
-    const on = !!ch && (ch.active || !!air) && !p.out && !p.finished && this.game.state === 'race';
-    if (on !== this.chainOn) {
-      this.chainOn = on;
-      $('chain').classList.toggle('hidden', !on);
-      this.chainSeq = -1;
-      this.chainMult = 0;
-    }
-    if (!on) return;
-    const el = $('chain');
-    if (ch.seq !== this.chainSeq || air !== this.chainAir) {
-      this.chainSeq = ch.seq;
-      this.chainAir = air;
-      const m = ch.mult;
-      const cm = el.querySelector('.cm');
-      cm.textContent = `×${m}`;
-      cm.className = 'cm' + (m >= MULT_MAX ? ' max' : m >= 5 ? ' hot' : '');
-      if (m !== this.chainMult) {
-        this.chainMult = m;
-        void cm.offsetWidth;
-        cm.classList.add('bump');
-      }
-      el.querySelector('.cp').textContent = ch.pts.toLocaleString();
-      const items = ch.list.map((e) => `${esc(e.label)} <i>+${e.pts}</i>`);
-      if (ch.live > 0) items.push(`<span class="lv">漂移中 +${ch.live}</span>`);
-      const shown = items.slice(air ? -2 : -3);
-      if (air) shown.push(`<span class="lv">${air}</span>`);
-      el.querySelector('.cl').innerHTML = shown.join(' · ');
-    }
-    const hold = (!p.grounded && p.state === 'ski') || p.drifting;
-    const k = !ch.n || hold ? 1 : Math.max(0, ch.t / CHAIN_T);
-    const w = Math.round(k * 100);
-    const cls = 'cb' + (hold || !ch.n ? ' hold' : ch.t < 1 ? ' low' : '');
-    if (w !== this.chainW || cls !== this.chainCls) {
-      this.chainW = w;
-      this.chainCls = cls;
-      const cb = el.querySelector('.cb');
-      cb.className = cls;
-      cb.firstChild.style.width = w + '%';
-    }
-  }
-
-  feed(html) {
-    const f = $('feed');
-    const d = document.createElement('div');
-    d.innerHTML = html;
-    const wrap = document.createElement('p');
-    wrap.style.margin = '0';
-    wrap.appendChild(d);
-    f.appendChild(wrap);
-    this.feedItems.push({ el: wrap, t: 4 });
-    while (this.feedItems.length > 4) this.feedItems.shift().el.remove();
-  }
-
-  update(dt) {
-    const g = this.game;
-    if (this.bannerT > 0) {
-      this.bannerT -= dt;
-      if (this.bannerT <= 0) $('banner').classList.remove('show');
-    }
-    if (this.tipT > 0) {
-      this.tipT -= dt;
-      if (this.tipT <= 0) $('tip').classList.remove('show');
-    }
-    if (this.popT > 0) {
-      this.popT -= dt;
-      if (this.popT <= 0) $('trickPop').classList.remove('show');
-    }
-    for (let i = this.feedItems.length - 1; i >= 0; i--) {
-      const it = this.feedItems[i];
-      it.t -= dt;
-      if (it.t <= 0) {
-        it.el.remove();
-        this.feedItems.splice(i, 1);
-      }
-    }
-    const p = g.player;
-    this.setFrost(!!p && p.frozenT > 0);
-    if (!p) return;
-    this.updateChain(p);
-    $('posNum').textContent = p.out ? '💀' : p.rank;
-    $('timer').textContent = fmtTime(p.finished ? p.finishTime : g.raceTime);
-    $('speedNum').textContent = p.out ? 0 : Math.round(p.vel.length() * 3.6);
-    const key = p.weapon ? p.weapon + p.ammo : '';
-    if (key !== this.lastItem) {
-      this.lastItem = key;
-      const w = p.weapon ? WEAPONS[p.weapon] : null;
-      $('itemIcon').textContent = w ? w.icon : '';
-      $('itemName').textContent = w ? w.name : '';
-      $('itemSlot').classList.toggle('has', !!w);
-      const am = $('itemAmmo');
-      am.classList.toggle('hidden', !w || p.ammo <= 1);
-      am.textContent = '×' + p.ammo;
-    }
-    const L = g.course.L;
-    for (let i = 0; i < g.racers.length; i++) {
-      const r = g.racers[i];
-      this.dots[i].style.top = Math.max(0, Math.min(100, (r.d / L) * 100)) + '%';
-      this.dots[i].style.opacity = r.out ? '0.25' : '';
-    }
-    this.rankT -= dt;
-    if (this.rankT <= 0) {
-      this.rankT = 0.25;
-      const mode = g.mode;
-      $('rank').innerHTML = g.order
-        .map((r, i) => {
-          const tag = mode.rankTag(r) ?? (r.finished ? '🏁' : r.weapon ? WEAPONS[r.weapon].icon : '');
-          const team = r.team >= 0 ? ` style="border-left:4px solid ${TEAM_COLORS[r.team]}"` : '';
-          return `<div class="row ${r.isPlayer ? 'me' : ''} ${r.finished ? 'done' : ''} ${r.out ? 'out' : ''}"${team}><span class="n">${i + 1}</span><span class="nm">${esc(r.name)}</span><span>${tag}</span></div>`;
-        })
-        .join('');
-      const html = mode.hud();
-      if (html !== this.lastModeHtml) {
-        this.lastModeHtml = html;
-        $('modeBox').innerHTML = html;
-        $('modeBox').classList.toggle('hidden', !html);
-      }
-    }
-  }
-
-  rewardHtml(rw) {
-    if (!rw) return '';
-    const P = this.game.profile;
-    const line = (label, xp, coins, cls = '') =>
-      `<div class="rl ${cls}"><span>${esc(label)}</span><span class="rx">${xp ? `+${xp}` : ''}</span><span class="rc">${coins ? `❄+${coins}` : ''}</span></div>`;
-    let xp = rw.xp;
-    let coins = rw.coins;
-    let html = '<div class="rl head"><span>奖励</span><span class="rx">经验</span><span class="rc">雪花币</span></div>';
-    for (const l of rw.lines) html += l.note ? `<div class="rl note">${esc(l.label)}</div>` : line(l.label, l.xp, l.coins);
-    for (const e of rw.extra) {
-      html += line(e.label, e.xp, e.coins, 'gold');
-      xp += e.xp || 0;
-      coins += e.coins || 0;
-    }
-    for (const t of rw.tasks) {
-      html += line(`✅ 每日任务：${t.name}`, t.xp, t.coins, 'good');
-      xp += t.xp;
-      coins += t.coins;
-    }
-    if (rw.bonus) {
-      html += line('🎁 今日任务全部完成', 0, rw.bonus, 'good');
-      coins += rw.bonus;
-    }
-    for (const a of rw.ach) {
-      html += line(`🏆 成就「${a.name}」${a.title ? ` · 称号「${a.title}」` : ''}`, 0, a.coins, 'gold');
-      coins += a.coins || 0;
-    }
-    html += line('合计', xp, coins, 'total');
-    const info = P.levelInfo();
-    html += `<div class="rlv">${rw.lvTo > rw.lvFrom ? `<b>⬆ 升到 Lv.${rw.lvTo}！</b>` : `Lv.${info.lv}`}<div class="xpbar"><i style="width:${info.need ? (info.cur / info.need) * 100 : 100}%"></i></div><span>❄ ${P.coins}</span></div>`;
-    if (rw.unlocks.length) html += `<div class="rl good unl">🔓 新解锁：${rw.unlocks.map(esc).join('、')}</div>`;
-    return html;
-  }
-
-  showResults(data) {
-    // data: { title, sub, rows: [{rank,name,me,time,pts,team}], nextLabel, reward, backLabel }
-    $('resTitle').textContent = data.title;
-    $('resSub').textContent = data.sub;
-    $('resList').innerHTML = data.rows
-      .map((r) => {
-        const team = r.team >= 0 ? ` style="border-left:5px solid ${TEAM_COLORS[r.team]}"` : '';
-        return `<div class="row ${r.me ? 'me' : ''}"${team}><span class="n">${r.rank}</span><span class="nm">${esc(r.name)}</span><span class="tm">${r.time}</span>${r.pts !== undefined ? `<span class="pt">${r.pts}</span>` : ''}</div>`;
-      })
-      .join('');
-    const rw = $('resReward');
-    if (data.reward) {
-      this.lastReward = data.reward;
-      rw.innerHTML = this.rewardHtml(data.reward);
-    }
-    rw.classList.toggle('hidden', !data.reward);
-    $('btnNext').textContent = data.nextLabel;
-    $('btnLobby').textContent = data.backLabel || '返回大厅';
-    $('results').classList.remove('hidden');
-  }
 }
+
+Object.assign(UI.prototype, matchMethods, boardMethods, shopMethods, hudMethods, resultsMethods);

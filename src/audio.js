@@ -4,6 +4,7 @@
 //   whistle1: 497093 · fall1: 395443 · boing1-4: 540790 518645 731262 543641
 //   pop1-2: 676000 578640 · plant1: 743678 · mumble1-2: 343911 361071（两条都加了低通，听起来像埋在雪里）
 import MUSIC_URL from './music/black-diamond.mp3';
+import MENU_URL from './music/lobby.mp3';
 
 const SAMPLE_URLS = import.meta.glob('./sfx/*.mp3', { eager: true, query: '?url', import: 'default' });
 
@@ -12,6 +13,10 @@ const SAMPLE_URLS = import.meta.glob('./sfx/*.mp3', { eager: true, query: '?url'
 const MUSIC_LEN = (120 * 4 * 60) / 143; // 一圈的长度（秒）
 const MUSIC_VOL = 0.5; // 相对音效的音量
 const MUSIC_PAUSED = 0.3; // 暂停时压到原来的几成
+// 大厅音乐：自己写的 16 秒循环，C 调，钟琴旋律加一层很轻的和弦。只在菜单里播。
+// 原始 WAV 在 ref/music-src/，第 2 个采样就已经出声，首尾能无缝接上
+const MENU_LEN = 16;
+const MENU_VOL = 0.42;
 
 export class Sfx {
   constructor() {
@@ -23,6 +28,9 @@ export class Sfx {
     this.musicBuf = null; // 解码好的背景音乐
     this.musicSrc = null; // 正在播的那一路
     this.musicOn = false; // 现在该不该有音乐（音乐还没解码完时先记着）
+    this.menuBuf = null;
+    this.menuSrc = null;
+    this.menuOn = false; // 人在大厅时要播大厅音乐
     this.asleep = false; // 页面被切到后台，声音暂停中
   }
 
@@ -39,8 +47,12 @@ export class Sfx {
     this.master.connect(ctx.destination);
     this.musicGain = ctx.createGain();
     this.musicGain.connect(this.master);
+    this.menuGain = ctx.createGain();
+    this.menuGain.gain.value = 0;
+    this.menuGain.connect(this.master);
     this.loadSamples();
     this.loadMusic();
+    this.loadMenu();
     // 切到别的标签页时游戏画面会停住，声音也跟着停；画面一恢复刷新（wake）就接着响
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) return;
@@ -164,6 +176,15 @@ export class Sfx {
   beep(high) {
     this.tone('square', high ? 1040 : 520, high ? 1040 : 520, high ? 0.5 : 0.18, 0.22);
   }
+  // 被追踪导弹锁定：短促的嘀
+  lockBeep() {
+    this.tone('square', 1480, 1480, 0.06, 0.12);
+  }
+  // 被雷击瞄准；locked：落点定住了
+  strikeWarn(locked) {
+    if (locked) this.tone('sawtooth', 1200, 600, 0.18, 0.14);
+    else this.tone('triangle', 700, 1400, 0.22, 0.16);
+  }
   whoosh(v = 1) {
     this.noise(0.7, 300, 'bandpass', 0.6 * v, 3000);
   }
@@ -215,8 +236,52 @@ export class Sfx {
       })
       .catch(() => {});
   }
+  loadMenu() {
+    fetch(MENU_URL)
+      .then((r) => r.arrayBuffer())
+      .then((b) => this.ctx.decodeAudioData(b))
+      .then((buf) => {
+        // mp3 开头的编码空白要跳过，否则循环处会断一下
+        const d = buf.getChannelData(0);
+        let i = 0;
+        while (i < d.length && Math.abs(d[i]) < 0.003) i++;
+        this.menuHead = Math.max(0, i - 1) / buf.sampleRate;
+        this.menuBuf = buf;
+        if (this.menuOn) this.menuStart();
+      })
+      .catch(() => {});
+  }
+  // 大厅：淡入后一直循环。比赛音乐在播时不插进来。
+  menuStart() {
+    if (this.musicOn) return;
+    this.menuOn = true;
+    if (!this.ctx || !this.menuBuf || this.menuSrc) return;
+    const t = this.ctx.currentTime;
+    const src = (this.menuSrc = this.ctx.createBufferSource());
+    src.buffer = this.menuBuf;
+    src.loop = true;
+    src.loopStart = this.menuHead || 0;
+    src.loopEnd = Math.min(src.loopStart + MENU_LEN, this.menuBuf.duration);
+    src.connect(this.menuGain);
+    this.menuGain.gain.cancelScheduledValues(t);
+    this.menuGain.gain.setValueAtTime(0, t);
+    this.menuGain.gain.linearRampToValueAtTime(MENU_VOL, t + 0.8);
+    src.start(t, src.loopStart);
+  }
+  menuStop(fade = 0.45) {
+    this.menuOn = false;
+    const src = this.menuSrc;
+    if (!src || !this.ctx) return;
+    this.menuSrc = null;
+    const t = this.ctx.currentTime;
+    this.menuGain.gain.cancelScheduledValues(t);
+    this.menuGain.gain.setValueAtTime(this.menuGain.gain.value, t);
+    this.menuGain.gain.linearRampToValueAtTime(0, t + fade);
+    src.stop(t + fade + 0.05);
+  }
   // 从头开始播，一直循环到 musicStop
   musicStart() {
+    this.menuStop(0.3);
     this.musicOn = true;
     if (!this.musicBuf || this.musicSrc) return;
     const t = this.ctx.currentTime;

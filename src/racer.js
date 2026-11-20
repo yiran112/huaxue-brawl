@@ -22,6 +22,11 @@ const SHORTCUT_CHANCE = [0, 0.12, 0.4]; // 机器人按难度（简单/普通/�
 const PLANT_IMPACT = 10; // 翻滚中砸向地面的速度超过它，就一头栽进雪里
 const PLANT_TIME = 1.25; // 倒插在雪里蹬腿的时间
 const PLANT_DEPTH = 0.95; // 埋多深：正好埋到腰，只剩两条腿在外面
+const NITRO_MAX = 2; // 氮气最多存几瓶
+const NITRO_TIME = 1.4; // 一瓶喷多久
+const DRAFT_LEN = 26; // 前面的人离自己多远之内算吸尾流（米）
+const DRAFT_W = 2.4; // 横向偏开多少还算在尾流里
+const BOT_NITRO = [0.25, 0.7, 1.5]; // 机器人有氮气时，直道上每秒放的概率（按难度）
 const NET_DELAY = 0.1; // 联机：别人的角色按 0.1 秒前的状态显示，中间丢一两个包也不抖
 const NET_EXTRAP = 0.25; // 联机：断流时最多顺着速度往前推这么久
 const Y = new THREE.Vector3(0, 1, 0);
@@ -56,9 +61,9 @@ export class Racer {
     this.skier = new Skier(look);
     game.scene.add(this.skier.group);
     this.trail = new Trail(game.scene, trailColor(look) ?? game.trailColor);
-    // 装备属性（强化等级由调用方给）、队伍（-1 不分队）、是否已被淘汰
+    // 装备属性（改装等级由调用方给）、队伍（-1 不分队）、是否已被淘汰
     this.gear = look.gear || 'ski';
-    this.mods = gearMods(this.gear, opt.up);
+    this.mods = gearMods(this.gear, opt.up, !!opt.fair);
     this.team = opt.team ?? -1;
     this.out = false;
     this.surf = 0; // 脚下地表：0 普通 / 1 冰面 / 2 深雪
@@ -87,6 +92,12 @@ export class Racer {
     this.shieldT = 0;
     this.boostT = 0;
     this.turboT = 0; // 漂移 / 空翻奖励的小喷射
+    // 氮气：漂移、空中动作、尾流攒气，攒满一格存一瓶，自己按键放
+    this.nitro = 0; // 这一格攒了多少（0~1）
+    this.nitroN = 0; // 存着几瓶
+    this.nitroT = 0; // 正在喷（和道具“氮气加速”分开：这个撞人不会把人撞飞）
+    this.draftOn = false; // 正贴在别人身后
+    this.draftT = 0;
     this.flip = 0; // 本次腾空已翻过的角度
     this.spinA = 0; // 本次腾空已转过的角度（绕竖直轴）
     this.grabbing = false;
@@ -123,6 +134,11 @@ export class Racer {
     this.hookTarget = null;
     this.sprayAcc = 0;
     this.hits = 0;
+    // 结算「本局之最」用：击飞别人几次、被击飞几次、技巧链结算总分、最高时速（km/h）
+    this.knocks = 0;
+    this.downs = 0;
+    this.skillPts = 0;
+    this.topSpeed = 0;
     this.t = Math.random() * 10;
     this.cdMul = 1;
     // sc：正在走的近道 { b, i }；scSeen：已经做过“走不走近道”决定的岔路；flipN：这次腾空打算翻几圈
@@ -187,7 +203,67 @@ export class Racer {
     if (!lv) return;
     const big = c >= DRIFT_L2;
     this.turboT = Math.max(this.turboT, big ? 1.0 : 0.5);
+    this.addNitro(big ? 0.16 : 0.08);
     this.game.onDriftBoost(this, big);
+    this.game.weapons.evade(this);
+  }
+
+  addNitro(k) {
+    if (this.nitroN >= NITRO_MAX || !(k > 0)) return;
+    this.nitro += k * this.mods.gain;
+    while (this.nitro >= 1 && this.nitroN < NITRO_MAX) {
+      this.nitro -= 1;
+      this.nitroN++;
+    }
+    if (this.nitroN >= NITRO_MAX) this.nitro = 0;
+  }
+
+  useNitro() {
+    if (this.nitroN <= 0 || this.state !== 'ski' || this.frozenT > 0 || this.finished || this.out) return false;
+    this.nitroN--;
+    this.nitroT = NITRO_TIME * this.mods.nitro;
+    this.game.onNitro?.(this);
+    return true;
+  }
+
+  // 起步喷：倒计时喊“冲”的那一下踩准了
+  startBoost(perfect) {
+    this.turboT = Math.max(this.turboT, perfect ? 1.3 : 0.6);
+    _v.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).multiplyScalar(perfect ? 7 : 3.5);
+    this.vel.add(_v);
+    this.game.onStartBoost?.(this, perfect);
+  }
+
+  // 尾流：贴在别人身后风阻小、慢慢攒氮气；吸够了再闪出来，弹一下
+  updateDraft(dt) {
+    const was = this.draftOn;
+    let on = false;
+    if (this.state === 'ski' && this.grounded && this.speed > 15 && !this.finished && this.frozenT <= 0) {
+      const cy = Math.cos(this.yaw);
+      const sy = Math.sin(this.yaw);
+      for (const o of this.game.racers) {
+        if (o === this || o.out || o.finished || o.state !== 'ski') continue;
+        const rx = o.pos.x - this.pos.x;
+        const rz = o.pos.z - this.pos.z;
+        const fwd = -sy * rx - cy * rz;
+        if (fwd < 3 || fwd > DRAFT_LEN || Math.abs(o.pos.y - this.pos.y) > 3) continue;
+        if (Math.abs(cy * rx - sy * rz) < DRAFT_W) {
+          on = true;
+          break;
+        }
+      }
+    }
+    this.draftOn = on;
+    if (on) {
+      this.draftT = Math.min(2, this.draftT + dt);
+      this.addNitro(dt * 0.12);
+      return;
+    }
+    if (was && this.draftT > 0.8 && this.state === 'ski' && this.frozenT <= 0 && !this.finished) {
+      this.turboT = Math.max(this.turboT, 0.35 + 0.3 * this.draftT);
+      this.game.onDraft?.(this);
+    }
+    this.draftT = 0;
   }
 
   // 同队（团队赛）：道具互不伤害
@@ -253,6 +329,8 @@ export class Racer {
       this.game.onTrick(this, '转体', an, 'spin');
     }
     if (airT > 1.2) chain.add(`滞空 ${airT.toFixed(1)}s`, (airT - 0.8) * 150);
+    this.addNitro(Math.min(3, Math.abs(n)) * 0.12 + Math.min(3, Math.abs(sn)) * 0.1 + grabOk * 0.1 + (airT > 1.2 ? 0.05 : 0));
+    if (n !== 0 || sn !== 0) this.game.weapons.evade(this);
     if (parts.length) this.game.onLanded?.(this, parts, grabOk);
   }
 
@@ -314,6 +392,7 @@ export class Racer {
     this.frozenT = 0;
     this.boostT = 0;
     this.turboT = 0;
+    this.nitroT = 0;
     this.hookT = 0;
     this.clearAir();
     this.drifting = false;
@@ -343,6 +422,7 @@ export class Racer {
     this.frozenT = dur;
     this.boostT = 0;
     this.turboT = 0;
+    this.nitroT = 0;
     this.drifting = false;
     this.driftCharge = 0;
     this.driftPts = 0;
@@ -397,6 +477,7 @@ export class Racer {
     if (this.padCool > 0) this.padCool -= dt;
     if (this.boostT > 0) this.boostT -= dt;
     if (this.turboT > 0) this.turboT -= dt;
+    if (this.nitroT > 0) this.nitroT -= dt;
     if (this.invulnT > 0) this.invulnT -= dt;
     if (this.frozenT > 0) {
       this.frozenT -= dt;
@@ -418,6 +499,7 @@ export class Racer {
     this.onIce = !!this.inShort && course._us < 0 && this.d > this.inShort.dIce;
     this.surf = course.zones.length ? course.surfaceKind(this.pos.x, this.d) : 0;
     const mods = this.mods;
+    this.updateDraft(dt);
     if (this.isBot && !this.finished) this.think(dt);
 
     const inp = this.input;
@@ -493,18 +575,23 @@ export class Racer {
           // 漂移：横滑磨掉的速度大部分转回前进方向，所以急转也不怎么掉速
           vF += (Math.sqrt(Math.max(0, sp2 - _lat.lengthSq())) - vF) * 0.92;
           if (drifting) {
+            this.addNitro(dt * 0.11 * clamp(this.slip / 5, 0, 1));
             this.driftCharge += dt * clamp(this.slip / 5, 0, 1) * mods.drift;
             this.driftPts += dt * 110 * clamp(this.slip / 5, 0, 1) * clamp(vF / 25, 0.5, 1.5);
             this.chain.setLive(this.driftPts);
           }
         }
         let cd = (tuck ? 0.004 : 0.006) * this.cdMul * mods.cd;
+        if (this.draftOn) cd *= 0.7;
         if (this.onIce) cd *= 0.55;
         else if (this.surf === 1) cd *= 0.6;
         let acc = 0;
         if (this.boostT > 0) {
           // 氮气：强推力 + 固定阻力，极速约 55 m/s（200 km/h）
           acc += 20;
+          cd = 0.009;
+        } else if (this.nitroT > 0 && !this.finished) {
+          acc += 19;
           cd = 0.009;
         }
         if (this.turboT > 0) acc += 13;
@@ -725,7 +812,7 @@ export class Racer {
   emitJets() {
     const game = this.game;
     _f.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    if (this.boostT > 0) {
+    if (this.boostT > 0 || this.nitroT > 0) {
       _v.copy(this.pos).addScaledVector(_f, -0.9);
       _v.y += 0.5;
       game.fx.flame(_v, -_f.x * 8 + (Math.random() - 0.5) * 3, 1 + Math.random() * 2, -_f.z * 8 + (Math.random() - 0.5) * 3, 0.3);
@@ -777,6 +864,18 @@ export class Racer {
       this.planted = true;
       if (this.plantT > 0) this.plantT = 0.5;
     }
+  }
+
+  // 交还给网络那头：掉线的真人连回来了 / 自己重连后，别人的角色不再由本机模拟
+  release(asBot) {
+    this.isBot = !!asBot;
+    this.netReset();
+    if (!this.owned) return;
+    this.owned = false;
+    this.drifting = false;
+    this.driftCharge = 0;
+    this.clearAir();
+    this.chain.reset();
   }
 
   // 按收到的状态插值，只管画面，不做物理
@@ -838,6 +937,7 @@ export class Racer {
     this.driftCharge = s.charge;
     this.boostT = s.f2 & 1 ? 1 : 0;
     this.turboT = s.f2 & 2 ? 1 : 0;
+    this.nitroT = s.f2 & 32 ? 1 : 0;
     this.shieldT = s.shield;
     this.invulnT = s.invuln;
     this.flip = s.flip !== 0 && b.flip !== 0 ? lerp(a.flip, b.flip, k) : s.flip;
@@ -937,7 +1037,7 @@ export class Racer {
       frozen: this.frozenT > 0,
       thaw: this.frozenT,
       hasProp: !!(this.weapon && WEAPONS[this.weapon].prop),
-      boost: this.boostT > 0 || this.turboT > 0,
+      boost: this.boostT > 0 || this.turboT > 0 || this.nitroT > 0,
       grab: this.grabbing && !tumbling,
     });
     this.skier.shield.visible = this.shieldT > 0;
@@ -1053,6 +1153,11 @@ export class Racer {
       else if (gap < -160) mul *= 0.88;
     }
     this.cdMul = mul * (1 + (this.idx % 4) * 0.025);
+
+    // 氮气：直道上贴地、没在漂移、近道里也不放（会冲出去）
+    if (this.nitroN > 0 && this.grounded && !this.drifting && !ai.sc && this.boostT <= 0 && this.nitroT <= 0 && Math.abs(diff) < 0.2 && Math.random() < dt * BOT_NITRO[diffLv]) {
+      this.useNitro();
+    }
 
     // 用道具
     if (this.weapon) {

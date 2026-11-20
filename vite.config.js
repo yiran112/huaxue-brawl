@@ -12,7 +12,7 @@ const matchServer = () => {
   const onlineCount = () => Math.max(presence.count(), match ? match.stats().online : 0, 1)
   const attach = (server) => {
     if (!server.httpServer) return
-    match = attachMatchServer(server.httpServer, { log: (s) => console.log(s), online: onlineCount })
+    match = attachMatchServer(server.httpServer, { log: (s) => console.log(s), online: onlineCount, verify: account.gearOf })
     server.httpServer.once('close', () => match.dispose())
   }
   const api = (middlewares) => {

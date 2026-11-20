@@ -1,6 +1,7 @@
 // 联机匹配服务器：排队匹配、开赛、房间内消息中转、房主移交。
 // 不跑任何游戏逻辑，所以既能挂在 Vite 开发服务器上（见 vite.config.js），
 // 也能挂在独立的 Node 服务器上（见 server/index.js）。
+import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { THEME_KEYS, LOOK_PRESETS, BOT_NAMES, MODE_KEYS, LENGTHS } from '../src/config.js';
 import { GEAR_KEYS, GOGGLES, BACKS, SCARVES, TRAILS, pickBotGear } from '../src/gear.js';
@@ -18,6 +19,8 @@ const JOIN_GRACE_MS = 5000; // 有人进来、而且剩下的时间比这还短�
 const FULL_MS = 3000; // 满员 / 房主点“立即开始”后的倒计时
 const LOAD_TIMEOUT_MS = 15000; // 等所有人加载赛道，超时就不等了
 const DROP_BACKLOG = 256 * 1024; // 对方积压超过这么多字节，就丢掉位置包（下一包会补上）
+const REJOIN_MS = 180000; // 比赛中掉线的人，位子留这么久，可以连回来
+const AGAIN_MS = 30 * 60000; // 自建房间开赛后这么久之内，还能点「再来一局」回到同一批人
 // 匹配赛的统一规则；玩法由玩家在首页选，每种玩法各排各的队
 const MATCH_RULES = { mode: 'race', length: 'medium', items: true, itemRate: 1, wildlife: true, difficulty: 1, rounds: 1, banned: [], track: 'random', theme: 'random' };
 const ITEM_MODES = ['race', 'elim', 'team', 'brawl'];
@@ -96,11 +99,13 @@ function cleanName(name, id) {
 }
 
 // exclusive：这台 HTTP 服务器上只有我们一个 WebSocket 服务，其他路径的升级请求直接拒绝
-export function attachMatchServer(httpServer, { path = '/ws', exclusive = false, log = () => {}, online = null } = {}) {
+// verify(账号钥匙)：返回这个账号在服务器上的存档（Profile），用来核对装备；不给就不核对
+export function attachMatchServer(httpServer, { path = '/ws', exclusive = false, log = () => {}, online = null, verify = null } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
   const clients = new Set();
   const rooms = new Set();
   const waiting = new Map(); // 玩法 → 这个玩法正在等人的那个匹配房间
+  const ended = new Map(); // 开过赛的自建房间号 → { 规则, 再来一局开的新房间 }
   let nextId = 1;
   let nextRoom = 1;
 
@@ -118,6 +123,7 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
       reason: room.reason || 'fill',
       kind: room.kind || 'match',
       mode: room.rules ? room.rules.mode : 'race',
+      id: room.id,
     };
     for (const m of room.members) send(m, info);
   };
@@ -150,8 +156,27 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
     for (const c of clients) if (c.listing && !c.room) send(c, msg);
   }
 
+  // 按服务器上的存档核对外观：没拥有的装备、配饰换回默认，强化等级用服务器记的。没有有效账号就全按默认
+  function checkLook(c, msg) {
+    if (typeof msg.tok === 'string') c.tok = msg.tok.slice(0, 80);
+    if (msg.look !== undefined) c.rawLook = msg.look;
+    const L = (c.look = cleanLook(c.rawLook));
+    c.up = null;
+    if (!verify) return;
+    let p = null;
+    try {
+      p = c.tok ? verify(c.tok) : null;
+    } catch {
+      p = null;
+    }
+    if (!p || !p.gearOwned(L.gear)) L.gear = 'ski';
+    if (!p || !p.hatOwned(L.hat)) L.hat = 0;
+    for (const slot of ['goggles', 'back', 'scarf', 'trail']) if (!p || !p.cosmeticOwned(slot, L[slot])) L[slot] = 0;
+    if (p) c.up = p.up(L.gear);
+  }
+
   function admit(c, room, msg) {
-    c.look = cleanLook(msg.look);
+    checkLook(c, msg);
     c.listing = false;
     const base = cleanName(msg.name, c.id);
     let name = base;
@@ -165,7 +190,7 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
 
   function queue(c, msg) {
     if (c.room) return;
-    c.look = cleanLook(msg.look);
+    checkLook(c, msg);
     const base = cleanName(msg.name, c.id);
     const onlineNow = () => {
       const n = online ? online() : clients.size;
@@ -247,31 +272,59 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
     log(`[room] ${c.name} 快速进入房间 #${room.id}`);
   }
 
+  // 自己开的房间打完一局点「再来一局」：第一个点的人按原规则重开一间并当房主，后面点的人进同一间
+  function again(c, msg) {
+    if (c.room) return;
+    const prev = ended.get(Math.floor(Number(msg.id)));
+    if (!prev) {
+      c.listing = true;
+      send(c, { t: 'lobby', rooms: [...rooms].filter((r) => r.kind === 'custom' && r.state === 'waiting').map(roomCard), error: '房间已经解散了' });
+      return;
+    }
+    let room = prev.next;
+    if (!room || !rooms.has(room) || room.state !== 'waiting' || room.members.length >= room.rules.seats) {
+      room = { id: nextRoom++, kind: 'custom', state: 'waiting', members: [], host: null, rules: prev.rules, startAt: 0, reason: 'host', timer: null, loadTimer: null };
+      rooms.add(room);
+      prev.next = room;
+    }
+    admit(c, room, msg);
+    pushRoom(room);
+    pushLobby();
+    log(`[room] ${c.name} 再来一局，进入房间 #${room.id}（${room.members.length}/${room.rules.seats}）`);
+  }
+
   function startRoom(room) {
     if (room.state !== 'waiting') return;
     if (room.mode && waiting.get(room.mode) === room) waiting.delete(room.mode);
     if (!room.members.length) return closeRoom(room);
     room.state = 'loading';
+    if (room.kind === 'custom') ended.set(room.id, { rules: room.rules, next: null, at: Date.now() });
     const custom = room.kind === 'custom' ? room.rules : null;
     const seats = (room.rules && room.rules.seats) || MAX_PLAYERS;
     const fixed = custom && custom.track !== 'random' ? TRACK_MAP[custom.track] : null;
     const seed = fixed ? fixed.seed : (Math.random() * 1e9) | 0;
     const theme = fixed ? fixed.theme : custom && custom.theme !== 'random' ? custom.theme : pick(THEME_KEYS);
     const rules = room.rules || MATCH_RULES;
-    // 真人随机排发车位，空位由机器人补齐
+    // 真人随机排发车位，空位由机器人补齐。开赛前按最新存档再核对一次装备（排队时刚买的也算上）
     const humans = shuffle(room.members.slice());
+    for (const m of humans) checkLook(m, {});
     const taken = new Set(humans.map((m) => m.name));
     const botNames = shuffle(BOT_NAMES.filter((n) => !taken.has(n)));
     const roster = [];
     humans.forEach((m, i) => {
       m.idx = i;
       m.ready = false;
-      roster.push({ idx: i, id: m.id, name: m.name, look: m.look, bot: false });
+      m.key = randomBytes(9).toString('hex'); // 掉线后凭它回到这个位子
+      roster.push({ idx: i, id: m.id, name: m.name, look: m.look, up: m.up || null, bot: false });
     });
     for (let i = humans.length, k = 0; i < seats; i++, k++) {
       roster.push({ idx: i, id: 0, name: botNames[k % botNames.length], look: botLook(k), bot: true });
     }
-    for (const m of room.members) send(m, { t: 'start', seed, theme, track: fixed ? fixed.id : 'random', rules, roster, host: room.host.id, you: m.idx });
+    room.start = { seed, theme, track: fixed ? fixed.id : 'random', rules, roster };
+    room.away = new Map(); // 座位钥匙 → 掉线的人
+    room.snap = null; // 房主每秒传一份比赛现状，给连回来的人用
+    room.snapAt = 0;
+    for (const m of room.members) send(m, { t: 'start', ...room.start, host: room.host.id, you: m.idx, key: m.key });
     room.loadTimer = setTimeout(() => go(room), LOAD_TIMEOUT_MS);
     pushLobby();
     log(`[match] 房间 #${room.id} 开赛：${humans.length} 人 + ${seats - humans.length} 个机器人`);
@@ -285,13 +338,21 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
     for (const m of room.members) send(m, { t: 'go' });
   }
 
-  function leave(c) {
+  // drop：比赛中连接断了（不是自己点退出），位子先留着
+  function leave(c, drop = false) {
     const room = c.room;
     if (!room) return;
     c.room = null;
     const i = room.members.indexOf(c);
     if (i >= 0) room.members.splice(i, 1);
-    if (!room.members.length) return closeRoom(room);
+    if (drop && c.key && room.away && room.state !== 'waiting') room.away.set(c.key, { id: c.id, idx: c.idx, name: c.name, look: c.look, at: Date.now() });
+    if (!room.members.length) {
+      if (room.away && room.away.size && room.state !== 'waiting') {
+        room.host = null;
+        return;
+      }
+      return closeRoom(room);
+    }
     if (room.host === c) room.host = room.members[0];
     if (room.state === 'waiting') {
       const cap = (room.rules && room.rules.seats) || MAX_PLAYERS;
@@ -303,6 +364,54 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
       for (const m of room.members) send(m, { t: 'leave', id: c.id, host: room.host.id });
       if (room.state === 'loading' && room.members.every((m) => m.ready)) go(room);
     }
+  }
+
+  // 掉线的人连回来：按钥匙找回原来的位子，把开赛信息和比赛现状发给他
+  function rejoin(c, msg) {
+    if (c.room) return;
+    const key = typeof msg.key === 'string' ? msg.key.slice(0, 40) : '';
+    let room = null;
+    for (const r of key ? rooms : []) {
+      if (!r.away || r.state === 'waiting') continue;
+      // 旧连接服务器这边还没发现断了：当它掉线处理
+      const old = r.members.find((m) => m.key === key);
+      if (old) {
+        leave(old, true);
+        old.ws.terminate();
+      }
+      if (r.away.has(key)) {
+        room = r;
+        break;
+      }
+    }
+    if (!room) return send(c, { t: 'rejoin', ok: false });
+    const seat = room.away.get(key);
+    room.away.delete(key);
+    c.id = seat.id;
+    c.name = seat.name;
+    c.look = seat.look;
+    c.idx = seat.idx;
+    c.key = key;
+    c.listing = false;
+    c.ready = room.state !== 'loading';
+    c.room = room;
+    room.members.push(c);
+    if (!room.host) room.host = c;
+    const now = Date.now();
+    send(c, {
+      t: 'rejoin',
+      ok: true,
+      ...room.start,
+      host: room.host.id,
+      you: c.idx,
+      id: c.id,
+      key,
+      state: room.state,
+      humans: room.members.filter((m) => m !== c).map((m) => m.id),
+      snap: room.snap,
+      age: room.snap ? now - room.snapAt : 0,
+    });
+    log(`[match] ${c.name} 回到房间 #${room.id}`);
   }
 
   function onText(c, text) {
@@ -333,8 +442,33 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
       case 'quickroom':
         quickCustom(c, msg);
         break;
+      case 'again':
+        again(c, msg);
+        break;
       case 'leave':
         leave(c);
+        break;
+      case 'rejoin':
+        rejoin(c, msg);
+        break;
+      case 'back':
+        // 连回来的人已经对好了自己的位置：其他人把他的角色从机器人手里交还给他
+        if (room && room.state !== 'waiting') {
+          for (const m of room.members) if (m !== c) send(m, { t: 'back', id: c.id, idx: c.idx, host: room.host.id });
+        }
+        break;
+      case 'snap':
+        if (room && room.host === c && room.state === 'racing' && msg.s && typeof msg.s === 'object') {
+          room.snap = msg.s;
+          room.snapAt = Date.now();
+        }
+        break;
+      case 'look':
+        // 排队时去车库换了装备 / 外观：开赛前以最新的为准
+        if (room && room.state === 'waiting') {
+          checkLook(c, { look: msg.look });
+          pushRoom(room);
+        }
         break;
       case 'startnow':
         if (room && room.state === 'waiting' && room.host === c) {
@@ -392,7 +526,7 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
       c.alive = true;
     });
     ws.on('close', () => {
-      leave(c);
+      leave(c, true);
       clients.delete(c);
     });
     ws.on('error', () => {});
@@ -400,6 +534,14 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
 
   // 心跳：断网但没正常关闭的连接，30 秒内清掉
   const heartbeat = setInterval(() => {
+    // 掉线太久没回来的位子作废；房间里没人、也没有等着回来的人，就关掉
+    const now = Date.now();
+    for (const [id, e] of ended) if (now - e.at > AGAIN_MS) ended.delete(id);
+    for (const room of [...rooms]) {
+      if (!room.away || !room.away.size) continue;
+      for (const [k, a] of room.away) if (now - a.at > REJOIN_MS) room.away.delete(k);
+      if (!room.members.length && !room.away.size) closeRoom(room);
+    }
     for (const c of clients) {
       if (!c.alive) {
         c.ws.terminate();

@@ -5,6 +5,7 @@ import { WEAPON_KEYS } from './config.js';
 import { clamp, wrapAngle } from './util.js';
 
 const SEND_MS = 50; // 每秒发 20 次状态
+const SNAP_MS = 1000; // 房主每秒给服务器传一份比赛现状，掉线的人连回来时用
 const HEAD = 10; // 包头：类型 1 + 人数 1 + 发送方时间戳 8
 const REC = 34; // 每个选手一条记录的字节数
 const MAX_RACERS = 8;
@@ -23,6 +24,7 @@ export class Net {
     // off 未联机 / connecting 正在连 / queue 排队中 / load 加载赛道 / race 比赛中
     this.phase = 'off';
     this.lastSend = 0;
+    this.lastSnap = 0;
     this.buf = new ArrayBuffer(HEAD + REC * MAX_RACERS);
     this.dv = new DataView(this.buf);
   }
@@ -76,7 +78,19 @@ export class Net {
   // 进入匹配队列，每种玩法各排各的队
   match(name, look, mode, rank) {
     this.connect(() => {});
-    this.pendingEnter = { t: 'queue', name, look, mode, rank: rank || '' };
+    this.pendingEnter = { t: 'queue', name, look, mode, rank: rank || '', tok: this.token() };
+  }
+
+  // 账号钥匙：服务器凭它按存档核对装备
+  token() {
+    const a = this.game.account;
+    return (a && a.token) || '';
+  }
+
+  // 比赛中掉线后连回原来的位子
+  rejoin(key) {
+    this.connect(() => {});
+    this.pendingEnter = { t: 'rejoin', key };
   }
 
   // 只看房间列表，先不进任何房间
@@ -95,6 +109,7 @@ export class Net {
 
   // 创建 / 加入 / 快速进房。还没连上就等连接成功再发。
   enter(msg) {
+    msg = { ...msg, tok: this.token() };
     if (this.ws && this.ws.readyState === 1) {
       this.pendingEnter = null;
       this.phase = 'queue';
@@ -105,7 +120,7 @@ export class Net {
     this.pendingEnter = msg;
   }
 
-  // 离开队列 / 房间（主动断开，不触发断线回调）
+  // 离开队列 / 房间（主动断开，不触发断线回调）。先说一声，服务器就不会给你留位子
   leave() {
     const ws = this.ws;
     this.ws = null;
@@ -114,6 +129,7 @@ export class Net {
     if (!ws) return;
     ws.onopen = ws.onmessage = ws.onclose = null;
     try {
+      if (ws.readyState === 1) ws.send('{"t":"leave"}');
       ws.close();
     } catch {
       /* 已经关了 */
@@ -175,6 +191,17 @@ export class Net {
         this.phase = 'race';
         game.onNetGo();
         break;
+      case 'rejoin':
+        if (this.phase !== 'queue') break;
+        if (!m.ok || !Array.isArray(m.roster)) {
+          game.onNetRejoin(null);
+          break;
+        }
+        this.phase = m.state === 'loading' ? 'load' : 'race';
+        this.id = m.id;
+        this.hostId = m.host;
+        game.onNetRejoin(m);
+        break;
       case 'leave': {
         if (!this.active) break;
         const hostChanged = this.hostId !== m.host;
@@ -182,6 +209,11 @@ export class Net {
         game.onNetLeave(m.id, hostChanged);
         break;
       }
+      case 'back':
+        if (!this.active) break;
+        this.hostId = m.host;
+        game.onNetBack(m);
+        break;
       case 'ev':
         if (this.active) game.onNetEv(m);
         break;
@@ -197,6 +229,10 @@ export class Net {
     const ws = this.ws;
     // 网络堵住时不再往里塞，等下一次
     if (!ws || ws.readyState !== 1 || ws.bufferedAmount > 65536) return;
+    if (this.isHost && now - this.lastSnap > SNAP_MS) {
+      this.lastSnap = now;
+      this.sendJson({ t: 'snap', s: this.game.raceSnap() });
+    }
     const dv = this.dv;
     let o = HEAD;
     let n = 0;
@@ -212,7 +248,7 @@ export class Net {
       dv.setInt16(o + 17, i16(r.vel.z * 100), true);
       dv.setInt16(o + 19, i16(wrapAngle(r.yaw) * 10000), true);
       dv.setUint8(o + 21, (r.grounded ? 1 : 0) | ((STATE_CODE[r.state] || 0) << 1) | (r.drifting ? 8 : 0) | (vis.tuck ? 32 : 0) | (vis.brake ? 64 : 0));
-      dv.setUint8(o + 22, (r.boostT > 0 ? 1 : 0) | (r.turboT > 0 ? 2 : 0) | (r.plantT > 0 ? 4 : 0) | (r.driftDir > 0 ? 8 : 0) | (r.grabbing ? 16 : 0));
+      dv.setUint8(o + 22, (r.boostT > 0 ? 1 : 0) | (r.turboT > 0 ? 2 : 0) | (r.plantT > 0 ? 4 : 0) | (r.driftDir > 0 ? 8 : 0) | (r.grabbing ? 16 : 0) | (r.nitroT > 0 ? 32 : 0));
       dv.setInt8(o + 23, clamp(Math.round(vis.steer * 80), -127, 127));
       dv.setInt16(o + 24, i16(r.flip * 1000), true);
       dv.setUint8(o + 26, u8(Math.ceil(Math.max(0, r.shieldT) * 10)));
@@ -242,18 +278,20 @@ export class Net {
     if (buf.byteLength < HEAD + n * REC) return;
     const ts = dv.getFloat64(2, true);
     if (!Number.isFinite(ts)) return;
-    const racers = this.game.racers;
+    const game = this.game;
+    const racers = game.racers;
     for (let k = 0, o = HEAD; k < n; k++, o += REC) {
       const r = racers[dv.getUint8(o)];
-      // 自己负责的选手不听别人的
-      if (!r || r.owned) continue;
+      // 自己负责的选手不听别人的；只有刚连回来时，照房主那边机器人替自己跑到的位置接上
+      const self = !!r && r.isPlayer && game.rejoinSync > 0;
+      if (!r || (r.owned && !self)) continue;
       const x = dv.getFloat32(o + 1, true);
       const y = dv.getFloat32(o + 5, true);
       const z = dv.getFloat32(o + 9, true);
       if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
       const f1 = dv.getUint8(o + 21);
       const w = dv.getUint8(o + 30);
-      r.netPush({
+      const s = {
         ts,
         x,
         y,
@@ -277,7 +315,9 @@ export class Net {
         weapon: WEAPON_KEYS[w] || null,
         ammo: dv.getUint8(o + 31),
         spin: dv.getInt16(o + 32, true) / 1000,
-      });
+      };
+      if (self) game.syncSelf(s);
+      else r.netPush(s);
     }
   }
 }

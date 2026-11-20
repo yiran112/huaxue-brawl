@@ -1,9 +1,12 @@
 // 任务面板（首页「每日任务」点开的那一层）和「成长」页三个子页的内容。样式在 quest.css。
 import './quest.css';
-import { ACHIEVEMENTS, STAT_LABELS, MAX_LV, TASK_XP, TASK_COINS, TASK_BONUS, seasonNow, seasonLeftText, seasonReward, blankSeason } from './profile.js';
-import { TRACK_MAP } from './tracks.js';
+import { ACHIEVEMENTS, ACH_MAP, STAT_LABELS, CUP_LV, TASK_XP, TASK_COINS, TASK_PARTS, TASK_BONUS, TASK_BONUS_PARTS, seasonNow, seasonLeftText, seasonReward, blankSeason } from './profile.js';
+import { TRACK_MAP, CUPS } from './tracks.js';
+import { HATS, MODE_KEYS } from './config.js';
+import { GEAR, GEAR_KEYS, UP_KEYS, UP_MAX, HAT_UNLOCK, COSMETIC_SLOTS } from './gear.js';
 import { RANK_LV } from './rank.js';
 import { fmtTime } from './util.js';
+import { PART_ICON } from './ui/common.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -13,6 +16,14 @@ const short = (n) => {
   n = Number(n) || 0;
   return n >= 100000 ? `${(n / 10000).toFixed(n >= 1e6 ? 0 : 1)}万` : n.toLocaleString();
 };
+
+// 二级界面顶栏（放进 .ptop 里）：左上角返回，旁边标题，右上角雪花币。任务面板和大厅里点开的各个界面共用
+// parts：要显示改装币时传数量
+export function pageTop(title, coins, { act = 'back', sub = '', parts = null } = {}) {
+  return `<button class="pback" data-act="${act}"><kbd>Esc</kbd>返回</button>
+    <div class="ptitle"><span><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</span></div>
+    ${parts == null ? '' : `<div class="pcoin pparts">${PART_ICON} <b>${num(parts)}</b></div>`}<div class="pcoin">❄ <b>${num(coins)}</b></div>`;
+}
 
 // 每日任务：图标 + 一句怎么做
 const TASK_META = {
@@ -162,11 +173,7 @@ export class Quest {
   render() {
     const tops = [...this.el.querySelectorAll('.qbody')].map((x) => x.scrollTop);
     const P = this.ui.game.profile;
-    this.el.innerHTML = `<header class="qtop">
-        <button class="qback" data-act="close"><kbd>Esc</kbd>返回</button>
-        <div class="qtitle"><span><b>任务</b><small>每天回来看看 · 本地时间 0 点刷新</small></span></div>
-        <div class="qcoin">❄ <b>${num(P.coins)}</b></div>
-      </header>
+    this.el.innerHTML = `<header class="ptop">${pageTop('任务', P.coins, { act: 'close', sub: '每天回来看看 · 本地时间 0 点刷新' })}</header>
       <div class="qgrid">${this.dayHtml()}${this.weekHtml()}${this.nextHtml()}</div>`;
     this.el.querySelectorAll('.qbody').forEach((x, i) => (x.scrollTop = tops[i] || 0));
     this.date = P.data.daily.date;
@@ -190,7 +197,7 @@ export class Quest {
           desc: esc(m.tip),
           pct: (prog / t.goal) * 100,
           label: `${num(prog)} / ${num(t.goal)}`,
-          pill: `❄ +${TASK_COINS}`,
+          pill: `❄ +${TASK_COINS}　${PART_ICON} +${TASK_PARTS}`,
           sub: `<small>+${TASK_XP} 经验</small><span class="qst ${t.done ? 'ok' : ''}">${t.done ? '✔ 已到账' : '进行中'}</span>`,
           done: t.done,
         });
@@ -207,8 +214,10 @@ export class Quest {
           <div class="qboxHead"><span class="qlock">${bonus ? '🎁' : '🔒'}</span><div><b>全勤奖励</b><small>${bonus ? '今天的三个任务都做完了，奖励已到账' : `做完全部三个任务自动发放 · ${done} / ${tasks.length}`}</small></div></div>
           <div class="qtiles">
             <div class="qtile"><span>❄</span><b>+${TASK_BONUS}</b><small>雪花币</small></div>
+            <div class="qtile"><span>${PART_ICON}</span><b>+${TASK_BONUS_PARTS}</b><small>改装币</small></div>
             <div class="qtile dim"><span>📋</span><b>+${TASK_XP * tasks.length}</b><small>任务经验</small></div>
             <div class="qtile dim"><span>❄</span><b>+${TASK_COINS * tasks.length}</b><small>任务雪花币</small></div>
+            <div class="qtile dim"><span>${PART_ICON}</span><b>+${TASK_PARTS * tasks.length}</b><small>任务改装币</small></div>
             ${all ? '' : `<button class="qgo" data-act="${needCup ? 'rank' : 'go'}">${needCup ? '去排位' : '去比赛'} ▶</button>`}
           </div>
         </div>
@@ -331,8 +340,8 @@ export class Quest {
       <header class="qhead"><small>提前看看</small><b>明天</b><span class="qcd">${dailyLeft()}后刷新</span></header>
       <div class="qbody">${items}
         <div class="qsep">怎么算</div>
-        ${rule('❄', `每个任务 ❄${TASK_COINS} + ${TASK_XP} 经验`, '进度在每场比赛结算时累加')}
-        ${rule('🎁', `全部做完再送 ❄${TASK_BONUS}`, '一天一次')}
+        ${rule('❄', `每个任务 ❄${TASK_COINS} + ${TASK_PARTS} 改装币 + ${TASK_XP} 经验`, '进度在每场比赛结算时累加')}
+        ${rule('🎁', `全部做完再送 ❄${TASK_BONUS} + ${TASK_BONUS_PARTS} 改装币`, '一天一次')}
         ${rule('📬', '奖励自动到账', '不用手动领取，结算页会列出来')}
         <p class="qnote">没做完的任务不会留到第二天。</p>
       </div>
@@ -345,12 +354,45 @@ export class Quest {
 export function growthView(ui) {
   const P = ui.game.profile;
   const sub = ui.sub.growth;
-  if (sub === 'ach') return achView(P);
+  if (sub === 'ach') return achView(ui, P);
   if (sub === 'stats') return statsView(P);
   return homeView(ui, P);
 }
 
-// 总览：右边是档案（等级、称号、等级奖励），角色脚下一排生涯数字。每日任务只在首页的任务面板里看
+// 等级奖励轨道：每个有东西解锁的等级一格。[{ lv, items: [{ icon, name, buy }] }]
+const SLOT_ICON = { goggles: '🥽', back: '🎒', scarf: '🧣', trail: '🌈' };
+function levelRewards() {
+  const out = {};
+  const add = (u, icon, name) => u && u.lv > 1 && (out[u.lv] = out[u.lv] || []).push({ icon, name, buy: !!u.cost });
+  for (const k of GEAR_KEYS) add(GEAR[k].unlock, GEAR[k].icon, GEAR[k].name);
+  HAT_UNLOCK.forEach((u, i) => add(u, '💇', HATS[i]));
+  for (const slot in COSMETIC_SLOTS) COSMETIC_SLOTS[slot].list.forEach((it) => add(it.unlock, SLOT_ICON[slot] || '🎁', it.name));
+  CUPS.forEach((c, i) => add({ lv: CUP_LV[i] }, c.icon || '🏔️', `${c.name}赛道`));
+  for (const id of ['lv10', 'lv20']) if (ACH_MAP[id]) add({ lv: +id.slice(2) }, '🏆', `成就「${ACH_MAP[id].name}」`);
+  return Object.keys(out)
+    .map((lv) => ({ lv: +lv, items: out[lv] }))
+    .sort((a, b) => a.lv - b.lv);
+}
+
+// 角色脚下的等级奖励轨道：到了的打勾，下一个亮黄框，后面的灰着；可以左右拖
+function trackHtml(info) {
+  const nodes = levelRewards();
+  const next = nodes.find((n) => n.lv > info.lv);
+  const cells = nodes
+    .map((n) => {
+      const st = n.lv <= info.lv ? 'got' : n === next ? 'on' : 'lock';
+      const [a] = n.items;
+      const tip = n.items.map((it) => `${it.name}${it.buy ? '（可购买）' : ''}`).join('、');
+      return `<div class="ltn ${st}" title="Lv.${n.lv}：${esc(tip)}"><i class="ltlv">Lv.${n.lv}</i>
+        <span class="ltic">${n.items.slice(0, 2).map((it) => it.icon).join('')}</span>
+        <b>${esc(a.name)}</b><small>${n.items.length > 1 ? `等 ${n.items.length} 样` : a.buy ? '解锁后购买' : '直接解锁'}</small>${st === 'got' ? '<em>✓</em>' : ''}</div>`;
+    })
+    .join('');
+  return `<div class="spick ltrack"><div class="lthead"><b>等级奖励</b></div>
+    <div class="glist ltlist" data-rank="lv" title="按住左右拖动，可以翻看更多等级">${cells}</div></div>`;
+}
+
+// 总览：右边是档案（等级、称号、生涯速览），角色脚下是等级奖励轨道。每日任务只在首页的任务面板里看
 function homeView(ui, P) {
   const info = P.levelInfo();
   const titles = P.titles();
@@ -362,14 +404,6 @@ function homeView(ui, P) {
     <button class="${!P.data.title ? 'on' : ''}" data-act="title" data-v="">无</button>
     ${titles.map((t) => `<button class="${P.data.title === t ? 'on' : ''}" data-act="title" data-v="${esc(t)}">${esc(t)}</button>`).join('')}
     ${titles.length ? '' : '<span class="note">还没有称号</span>'}</div></div>`;
-  // 下一个有东西可解锁的等级
-  for (let lv = info.lv + 1; lv <= MAX_LV; lv++) {
-    const u = P.unlocksBetween(lv - 1, lv);
-    if (!u.length) continue;
-    body += `<div class="ssec">等级奖励<small>下一个在 Lv.${lv}</small></div>
-      <div class="strait"><span class="ic">🔓</span><p>${u.slice(0, 4).map(esc).join('、')}${u.length > 4 ? ` 等 ${u.length} 样` : ''}</p></div>`;
-    break;
-  }
   const head = {
     badge: `<small>Lv</small>${info.lv}`,
     small: P.data.title ? `称号「${esc(P.data.title)}」` : '还没佩戴称号',
@@ -390,22 +424,100 @@ function homeView(ui, P) {
     ['🚀', short(s.maxSpeed), '最高时速'],
     ['🎖️', rv.name, '段位'],
   ];
-  const extra = `<div class="spick gstrip">${strip.map(([ic, v, name]) => `<div class="gs"><span>${ic}</span><b>${v}</b><small>${name}</small></div>`).join('')}</div>`;
-  return { head, tags, body, extra, cls: '' };
+  body += `<div class="ssec">生涯速览<small>完整数据在「生涯」里</small></div>
+    <div class="gsmini">${strip.map(([ic, v, name]) => `<div class="gs"><span>${ic}</span><b>${v}</b><small>${name}</small></div>`).join('')}</div>`;
+  return { head, tags, body, extra: trackHtml(info), cls: '' };
 }
 
-// 成就：一整块宽面板，角色让到左边
-function achView(P) {
+// 成就的勋章图标、分类，和进度怎么算：[图标, 分类, 统计字段或 (stats, profile) => 当前值, 目标]
+const ACH_CATS = [['all', '全部'], ['race', '比赛'], ['fight', '对抗'], ['trick', '技巧'], ['ride', '滑行'], ['collect', '收藏'], ['mode', '排位 · 玩法']];
+const rankPts = (s, P) => P.rankPoints();
+const ACH_META = {
+  first: ['🎿', 'race', 'races', 1],
+  win1: ['🥇', 'race', 'wins', 1],
+  win10: ['🏆', 'race', 'wins', 10],
+  win50: ['👑', 'race', 'wins', 50],
+  race20: ['🚘', 'race', 'races', 20],
+  race100: ['🏔️', 'race', 'races', 100],
+  clean: ['🛡️', 'race', 'cleanWins', 1],
+  hit1: ['🎯', 'fight', 'hits', 1],
+  hit100: ['💣', 'fight', 'hits', 100],
+  hit500: ['🤖', 'fight', 'hits', 500],
+  flip3: ['🌀', 'trick', 'maxFlip', 3],
+  flip200: ['🤸', 'trick', 'flips', 200],
+  spin3: ['🌪️', 'trick', 'maxSpin', 3],
+  grab2: ['✋', 'trick', 'maxGrab', 2],
+  chain5: ['🔗', 'trick', 'bestMult', 5],
+  chain10: ['⛓️', 'trick', 'bestMult', 10],
+  chain30k: ['💫', 'trick', 'bestChain', 30000],
+  skill1m: ['✨', 'trick', 'skill', 1e6],
+  speed180: ['💨', 'ride', 'maxSpeed', 180],
+  speed230: ['🚀', 'ride', 'maxSpeed', 230],
+  air3: ['☁️', 'ride', 'maxAir', 3],
+  short20: ['🧱', 'ride', 'shortcuts', 20],
+  lv10: ['⭐', 'collect', (s, P) => P.level, 10],
+  lv20: ['🌟', 'collect', (s, P) => P.level, 20],
+  gearAll: ['🎒', 'collect', (s, P) => ['ski', 'board', 'sled', 'tube'].filter((k) => P.gearOwned(k)).length, 4],
+  gearS: ['💎', 'collect', (s, P) => GEAR_KEYS.filter((k) => GEAR[k].rarity === 'S' && P.gearOwned(k)).length, 1],
+  gearFull: ['🏎️', 'collect', (s, P) => GEAR_KEYS.filter((k) => P.gearOwned(k)).length, GEAR_KEYS.length],
+  upMax: ['🔧', 'collect', (s, P) => Math.max(0, ...GEAR_KEYS.map((k) => UP_KEYS.reduce((n, u) => n + P.up(k)[u], 0))), UP_KEYS.length * UP_MAX],
+  gold1: ['🥈', 'mode', rankPts, 100],
+  cupAll: ['🏅', 'mode', rankPts, 250],
+  chalAll: ['💠', 'mode', rankPts, 700],
+  chal5: ['🎖️', 'mode', (s, P) => (P.data.rank && P.data.rank.games) || 0, 5],
+  modesAll: ['🎮', 'mode', (s, P) => MODE_KEYS.filter((k) => P.data.modes[k]).length, MODE_KEYS.length],
+  teamWin: ['🤝', 'mode', 'teamWins', 1],
+  elimWin: ['💀', 'mode', 'elimWins', 1],
+  trick: ['🤹', 'mode', 'bestTrick', 30000],
+  brawl: ['🥊', 'mode', 'bestBrawl', 8],
+  ttGold: ['⏱️', 'mode', 'ttGold', 1],
+};
+const achMeta = (a) => ACH_META[a.id] || ['🏆', 'race', null, 0];
+const fmtProg = (v) => (Number.isInteger(v) ? short(v) : v.toFixed(1));
+// 返回 [当前, 目标]；算不出来的返回 null
+function achProg(a, P) {
+  const [, , src, goal] = achMeta(a);
+  if (!src || !goal) return null;
+  const cur = typeof src === 'function' ? src(P.data.stats, P) : Number(P.data.stats[src]) || 0;
+  return [Math.min(Math.max(0, cur), goal), goal];
+}
+
+// 点开一枚勋章：大图标、条件、进度、奖励
+function achDetail(a, P) {
+  const ok = !!P.data.ach[a.id];
+  const [icon, cat] = achMeta(a);
+  const pr = achProg(a, P);
+  const catName = (ACH_CATS.find((c) => c[0] === cat) || ACH_CATS[0])[1];
+  const prog = pr ? `<div class="gmprog"><i><u style="width:${(pr[0] / pr[1]) * 100}%"></u></i><span>${fmtProg(pr[0])} / ${fmtProg(pr[1])}</span></div>` : '';
+  return `<div class="gmodal"><button class="gmback" data-act="achClose" aria-label="关闭"></button>
+    <div class="gmbox ${ok ? 'done' : ''}"><span class="gmic">${icon}</span><small>${esc(catName)} · ${ok ? '已达成' : '未达成'}</small><b>${esc(a.name)}</b><p>${esc(a.desc)}</p>${ok ? '' : prog}
+      <div class="gmrw"><span>❄ ${num(a.coins)}</span>${a.title ? `<span>称号「${esc(a.title)}」</span>` : ''}</div>
+      <button class="sbtn main" data-act="achClose"><b>确定</b><i>OK</i></button></div></div>`;
+}
+
+// 成就：一整块宽面板，角色让到左边。上面一排分类，下面一格格勋章卡，点开看详情
+function achView(ui, P) {
   const total = ACHIEVEMENTS.length;
   const done = ACHIEVEMENTS.filter((a) => P.data.ach[a.id]);
   const got = done.length;
   const coins = done.reduce((n, a) => n + (a.coins || 0), 0);
   const allCoins = ACHIEVEMENTS.reduce((n, a) => n + (a.coins || 0), 0);
   const titleAll = ACHIEVEMENTS.filter((a) => a.title).length;
-  const cards = ACHIEVEMENTS.map((a) => {
-    const ok = !!P.data.ach[a.id];
-    return `<div class="gach ${ok ? 'done' : ''}"><span class="gic">${ok ? '🏆' : '🔒'}</span><div><b>${esc(a.name)}</b><small>${esc(a.desc)}</small><em>❄${a.coins}${a.title ? ` · 称号「${esc(a.title)}」` : ''}</em></div></div>`;
+  const cat = ACH_CATS.some((c) => c[0] === ui.achCat) ? ui.achCat : 'all';
+  const inCat = (k) => ACHIEVEMENTS.filter((a) => k === 'all' || achMeta(a)[1] === k);
+  const cats = ACH_CATS.map(([k, name]) => {
+    const list = inCat(k);
+    return `<button class="${k === cat ? 'on' : ''}" data-act="achCat" data-id="${k}">${name}<small>${list.filter((a) => P.data.ach[a.id]).length}/${list.length}</small></button>`;
   }).join('');
+  const cards = inCat(cat)
+    .map((a) => {
+      const ok = !!P.data.ach[a.id];
+      const pr = ok ? null : achProg(a, P);
+      const foot = ok ? `<em>❄${num(a.coins)}${a.title ? ' · 称号' : ''}</em>` : pr ? `<i class="gmbar"><u style="width:${(pr[0] / pr[1]) * 100}%"></u></i>` : `<em>❄${num(a.coins)}</em>`;
+      return `<button class="gmed ${ok ? 'done' : ''}" data-act="ach" data-id="${a.id}" title="${esc(a.desc)}"><span class="gmic">${achMeta(a)[0]}</span><b>${esc(a.name)}</b>${foot}</button>`;
+    })
+    .join('');
+  const sel = ACH_MAP[ui.achSel];
   const head = {
     badge: '🏆',
     small: '成就 · 达成时自动发放雪花币',
@@ -418,7 +530,7 @@ function achView(P) {
     [`还有 ${total - got} 个没达成`, ''],
     [`剩余奖励 ❄${num(allCoins - coins)}`, ''],
   ];
-  return { head, tags, body: `<div class="gachs">${cards}</div>`, extra: '', cls: 'wide' };
+  return { head, tags, body: `<nav class="gcats">${cats}</nav><div class="gmeds">${cards}</div>`, extra: sel ? achDetail(sel, P) : '', cls: 'wide' };
 }
 
 // 生涯：数字分组排成大格子

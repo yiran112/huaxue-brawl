@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { clamp, lerp, damp } from './util.js';
 import { SKINS } from './config.js';
 import { GEAR, rarityRank } from './gear.js';
+import { GEAR_MODELS, gearKit } from './gearModels.js';
 
 const matCache = new Map();
 export function lam(color, opts) {
@@ -169,17 +170,29 @@ export class Skier {
     const boot = 0x2e3038;
     const gear = (this.gear = GEAR_IDS.has(L.gear) ? L.gear : 'ski');
     const def = GEAR[gear];
-    // form 决定站姿和模型：同一种滑法的 C/B/A/S 共用一套骨架，稀有度只改尺寸和装饰
+    // form 决定滑法和站姿。没有独立模型的装备，同一种 form 共用一套骨架，稀有度只改尺寸和装饰；
+    // 有独立模型的（def.model）由 gearModels.js 造型，坐多高、腿伸多远也跟着那台载具走
     const form = (this.form = def.form || 'ski');
+    const spec = (this.spec = GEAR_MODELS[def.model] || null);
     const rank = rarityRank(def.rarity);
     const trim = def.trim ?? 0xffffff;
     // 雪橇 / 雪圈是坐着滑：整个人往下沉，腿往前伸
-    this.sitDrop = form === 'sled' ? 0.34 : form === 'tube' ? 0.26 : 0;
-    this.legBase = form === 'sled' ? 1.35 : form === 'tube' ? 1.15 : 0;
-    this.seatLean = this.sitDrop > 0 ? 0.38 : 0;
-    this.armSpread = form === 'board' ? 0.55 : 0;
-    inner.position.y = -0.75 - this.sitDrop;
+    this.sit = form === 'sled' || form === 'tube';
+    this.sitDrop = spec?.sitDrop ?? (form === 'sled' ? 0.34 : form === 'tube' ? 0.26 : 0);
+    this.legBase = spec?.legBase ?? (form === 'sled' ? 1.35 : form === 'tube' ? 1.15 : 0);
+    this.seatLean = this.sit ? 0.38 : 0;
+    this.armSpread = spec?.armSpread ?? (form === 'board' ? 0.55 : 0);
+    this.usePoles = form === 'ski' && spec?.poles !== false;
+    // grip：握着车把的载具，手臂抬到车把上；lift / bob：悬浮的载具离地多高、上下起伏多少
+    this.grip = spec?.grip || 0;
+    this.lift = spec?.lift || 0;
+    this.bob = spec?.bob || 0;
+    this.innerY = -0.75 - this.sitDrop + this.lift;
+    inner.position.y = this.innerY;
     this.vehicle = null;
+    // 独立模型用到的材质，以及要动起来的零件（尾焰、灯圈、羽翼、小旗）
+    const kit = spec ? gearKit(lam, L.ski, trim, -this.lift) : null;
+    this.gearFx = kit ? kit.fx : null;
 
     // 滑雪板（单板 / 雪橇 / 充气圈时只留一个空节点占位，动画代码照常转它）
     this.skis = [];
@@ -195,7 +208,8 @@ export class Skier {
       this.legs.push(leg);
       const g = new THREE.Group();
       g.position.set(sx * 0.17, 0.02, 0);
-      if (form === 'ski') this.buildSki(g, L.ski, rank, trim);
+      if (spec?.ski) spec.ski(g, kit);
+      else if (form === 'ski') this.buildSki(g, L.ski, rank, trim);
       hold.add(g);
       this.skis.push(g);
       // 靴子与腿
@@ -203,7 +217,15 @@ export class Skier {
       hold.add(limb(L.pants, sx * 0.17, 0.26, 0.04, sx * 0.18, 0.5, -0.14, 0.105));
       hold.add(limb(L.pants, sx * 0.18, 0.5, -0.14, sx * 0.13, 0.72, 0.1, 0.12));
     }
-    this.buildVehicle(form, L, rank, trim);
+    if (spec?.build) {
+      // inner 下沉了多少，载具就抬回多少：坐着滑的载具按雪面坐标造型，单板按脚底坐标
+      const v = (this.vehicle = new THREE.Group());
+      v.position.y = this.sitDrop;
+      spec.build(v, kit);
+      inner.add(v);
+    } else if (!spec) {
+      this.buildVehicle(form, L, rank, trim);
+    }
 
     // 躯干
     this.torso = new THREE.Group();
@@ -250,8 +272,8 @@ export class Skier {
       pole.add(mesh('cyl', 0xff6fae, 0.016, 1.15, 0.016, 0, -0.5, 0));
       pole.add(mesh('cyl', 0x20222a, 0.05, 0.02, 0.05, 0, -1.0, 0));
       pole.rotation.x = -1.05;
-      pole.visible = form === 'ski';
-      if (form === 'ski' && rank >= 2) pole.children[0].material = lam(trim);
+      pole.visible = this.usePoles;
+      if (this.usePoles && rank >= 2) pole.children[0].material = lam(trim);
       arm.add(pole);
       this.torso.add(arm);
       this.arms.push(arm);
@@ -541,12 +563,12 @@ export class Skier {
   setSeated() {
     this.seated = true;
     this.poles.forEach((p) => (p.visible = false));
-    // 缆车上坐着时，雪橇和充气圈不带上去
-    if (this.vehicle && this.sitDrop > 0) {
+    // 缆车上坐着时，雪橇、雪圈这类坐着滑的载具不带上去
+    if (this.vehicle && this.sit) {
       this.vehicle.visible = false;
-      this.inner.position.y = -0.75;
       this.legs.forEach((l) => (l.rotation.x = 0));
     }
+    this.inner.position.y = -0.75;
     this.torso.rotation.x = 0.05;
     this.arms[0].rotation.x = -0.5;
     this.arms[1].rotation.x = -0.5;
@@ -574,11 +596,16 @@ export class Skier {
     const frozen = s.frozen ? 0 : 1;
     // 抓板：站着滑的人收腿弯腰、右手去够板、左手甩开；坐着滑的人往后仰、举手、车头翘起来
     const gb = p.grab * (1 - fl);
-    const sit = this.sitDrop > 0;
+    const sit = this.sit;
+    // 握车把：翻滚和做抓板动作时松手；右手拿着武器时只剩左手握
+    const grip = this.grip ? (1 - fl) * (1 - gb) : 0;
+    const gripR = s.hasProp ? 0 : grip;
+    // 握着车把时少俯一点身，不然手会戳到车把前面去
+    const tuckLean = this.grip ? 0.25 : 0.5;
 
     this.inner.rotation.z = -p.lean * 0.42 * (1 - fl) + (sit ? 0 : gb * 0.32);
     this.inner.rotation.x = -gb * (sit ? 0.35 : 0.22);
-    this.torso.rotation.x = -(0.45 + p.tuck * 0.5 - p.air * 0.2 - p.brake * 0.25) + this.seatLean + fl * Math.sin(t * 17) * 0.5 + gb * (sit ? 0.45 : -0.75);
+    this.torso.rotation.x = -(0.45 + p.tuck * tuckLean - p.air * 0.2 - p.brake * 0.25) + this.seatLean + fl * Math.sin(t * 17) * 0.5 + gb * (sit ? 0.45 : -0.75);
     this.torso.rotation.z = -p.lean * 0.15;
     this.head.rotation.x = 0.3 + p.tuck * 0.35 - this.seatLean * 0.5 + gb * (sit ? -0.3 : 0.45);
     const wob = Math.sin(t * 9) * 0.04 * clamp(s.speed / 30, 0, 1) * frozen;
@@ -586,10 +613,12 @@ export class Skier {
     const spread = this.armSpread * (1 - fl);
     const a0 = base + wob + fl * Math.sin(t * 21) * 1.6;
     const a1 = base - wob + fl * Math.sin(t * 19 + 1.7) * 1.6 + (s.hasProp ? -0.9 : 0);
-    this.arms[0].rotation.x = lerp(a0, sit ? 2.9 : 0.6, gb);
-    this.arms[1].rotation.x = lerp(a1, sit ? 0.2 : 0.35, gb);
-    this.arms[0].rotation.z = lerp(-p.air * 0.7 - fl * 0.8 - p.brake * 0.3 - spread, sit ? -0.3 : -1.5, gb);
-    this.arms[1].rotation.z = lerp(p.air * 0.7 + fl * 0.8 + p.brake * 0.3 + spread, sit ? 0.5 : -0.25, gb);
+    // 身体前后一倾，肩膀跟着挪了位置，手臂要反着补回一部分，手才留在车把上
+    const hold = this.grip - 0.4 * (this.torso.rotation.x - this.seatLean + 0.45);
+    this.arms[0].rotation.x = lerp(lerp(a0, sit ? 2.9 : 0.6, gb), hold, grip);
+    this.arms[1].rotation.x = lerp(lerp(a1, sit ? 0.2 : 0.35, gb), hold, gripR);
+    this.arms[0].rotation.z = lerp(lerp(-p.air * 0.7 - fl * 0.8 - p.brake * 0.3 - spread, sit ? -0.3 : -1.5, gb), 0, grip);
+    this.arms[1].rotation.z = lerp(lerp(p.air * 0.7 + fl * 0.8 + p.brake * 0.3 + spread, sit ? 0.5 : -0.25, gb), 0, gripR);
     this.animateExtras(dt, s);
     const wedge = p.brake * 0.28;
     // 双板抓板时两块板交叉成 X
@@ -650,6 +679,19 @@ export class Skier {
         if (f.visible) f.scale.y = 0.3 + Math.random() * 0.25;
       }
     }
+    // 独立模型上会动的零件
+    if (this.bob) this.inner.position.y = this.innerY + this.bob * (1 + Math.sin(t * 3.1));
+    const fx = this.gearFx;
+    if (!fx) return;
+    for (const f of fx.flames) {
+      f.visible = !!s.boost;
+      if (f.visible) f.scale.z = f.userData.len * (0.7 + Math.random() * 0.6);
+    }
+    for (const g of fx.spin) g.rotation.y += g.userData.spin * dt;
+    // 羽翼贴地时微微起伏，腾空就扇起来
+    const flap = s.grounded ? 0.3 + Math.sin(t * 2) * 0.05 : 0.4 + Math.sin(t * 16) * 0.45;
+    for (const w of fx.wings) w.o.rotation.z = w.s * flap;
+    for (const f of fx.flags) f.rotation.y = Math.sin(t * 12) * 0.25 * (0.3 + v);
   }
 
   dispose() {

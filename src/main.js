@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import { THEMES, THEME_KEYS, LENGTHS, LOOK_PRESETS, BOT_NAMES, DEFAULT_RULES, POINTS, SKINS, MODES } from './config.js';
 import { GEAR, LOOK_EXTRA_DEFAULTS, COSMETIC_SLOTS, uniformUp, pickBotGear } from './gear.js';
 import { TRACK_MAP } from './tracks.js';
-import { RANK_LV, RANK_MAP } from './rank.js';
-import { Profile } from './profile.js';
+import { RANK_LV, RANK_MAP, scoreLeave, ESCAPE_EXTRA } from './rank.js';
+import { Profile, cleanNick, randomNick } from './profile.js';
 import { Account } from './account.js';
 import { makeMode, TEAM_NAMES } from './modes.js';
 import { Hazards, NO_HAZARDS } from './hazards.js';
@@ -18,12 +18,20 @@ import { Items, Weapons, Deer } from './weapons.js';
 import { buildArch, buildChairlift, glowTexture, canvasTex } from './props.js';
 import { Showroom, STAGE_TOP } from './showroom.js';
 import { UI, esc } from './ui.js';
+import { RaceHud } from './racehud.js';
+import { Quality } from './quality.js';
+import { Touch } from './touch.js';
+import { Emotes } from './emotes.js';
+import { Replay } from './replay.js';
 import { Net } from './net.js';
 import { clamp, lerp, damp, wrapAngle, fmtTime } from './util.js';
 
 const LS_RULES = 'huaxue_rules_v1';
 const LS_LOOK = 'huaxue_look_v1';
 const LS_NAME = 'huaxue_name_v1';
+// 正在打的联机比赛的座位钥匙：掉线 / 刷新 / 关掉网页后凭它回到这一局
+const LS_SEAT = 'huaxue_seat_v1';
+const SEAT_MS = 10 * 60 * 1000;
 const load = (k) => {
   try {
     return JSON.parse(localStorage.getItem(k)) || {};
@@ -56,6 +64,11 @@ const SHOW_H = 4.3;
 // 展厅里固定的打光方向（从镜头右上方照向角色），不跟赛道主题走
 const SHOW_SUN = new THREE.Vector3(0.45, 0.8, 0.6).normalize();
 const NO_ITEMS = { nearestAhead: () => null, update() {}, take() {}, dispose() {} };
+// 起步喷：喊“冲”之前这么多秒内按下 W 是完美起步；“冲”之后这么多秒内才按下是普通起步
+const START_PERFECT = 0.3;
+const START_LATE = 0.25;
+const BOT_START = [0.25, 0.45, 0.7]; // 机器人起步喷的概率（按难度）
+const FINISH_SLOW = 1.4; // 单机冲线后慢镜头持续几秒（真实时间）
 
 class Game {
   constructor() {
@@ -74,6 +87,15 @@ class Game {
     this.playerHits = 0;
     // 当前这一组比赛：quick 快速赛 / rank 排位
     this.session = { kind: 'quick', mode: this.rules.mode, track: this.rules.track };
+    // 认得出「刷新的是不是同一个标签页」：另一个标签页正在打的比赛，这边不去抢
+    try {
+      this.tabId = sessionStorage.getItem('huaxue_tab') || Math.random().toString(36).slice(2);
+      sessionStorage.setItem('huaxue_tab', this.tabId);
+    } catch {
+      this.tabId = Math.random().toString(36).slice(2);
+    }
+    this.rejoining = null; // 正在连回原来那一局：{ key, live, until }
+    this.rejoinSync = 0; // 连回来后，等房主发来自己角色的位置（剩余秒数）
     this.mode = makeMode('race', this);
     this.hazards = NO_HAZARDS;
     this.ghost = null;
@@ -86,8 +108,11 @@ class Game {
     this.rep = this.newReport();
     // 联机
     this.soloRules = this.rules; // 单机规则；联机比赛期间 this.rules 临时换成服务器发来的规则
-    const savedName = load(LS_NAME);
-    this.playerName = typeof savedName === 'string' ? savedName : '';
+    // 昵称放在存档里（老版本单独存在 LS_NAME）
+    if (!this.profile.data.name) {
+      this.profile.data.name = cleanNick(load(LS_NAME)) || randomNick();
+      this.profile.save();
+    }
     this.net = new Net(this);
     this.netMode = false; // 从点“开始比赛”进匹配，到回大厅之间都是 true
     this.customRoom = false; // 正在一间自己开的房间里，退出后回到房间列表
@@ -123,14 +148,23 @@ class Game {
     this.initSky();
     this.sfx = new Sfx();
     this.fx = new FX(this.scene);
+    this.quality = new Quality(this);
+    this.quality.apply();
     this.weapons = new Weapons(this);
     this.ui = new UI(this);
+    this.hud = new RaceHud(this);
+    this.touch = new Touch(this);
+    this.emotes = new Emotes(this);
+    this.replay = new Replay(this);
     this.beatPresence();
     this.seed = (Math.random() * 1e9) | 0;
     this.themeKey = this.resolveTheme();
     this.buildWorld();
     this.toMenu();
-    this.account.boot();
+    this.account.boot().then(() => {
+      this.resumeSeat();
+      this.joinInvite();
+    });
     this.bindInput();
     this.clock = new THREE.Clock();
     this.frameAt = 0;
@@ -301,10 +335,12 @@ class Game {
 
   // 用服务器存档换掉本地缓存，并卸下这个账号还没解锁的外观
   adoptProfile(data) {
+    const prevName = this.playerName;
     this.profile.loadData(data);
     this.validateLook();
     save(LS_LOOK, this.look);
-    if (this.account.username && !this.playerName) this.setName(this.account.username);
+    if (!this.playerName) this.setName(this.account.username || prevName || randomNick());
+    this.checkRankLeave();
     this.ui.refreshProfile();
     this.ui.refreshBoard();
     if (this.state === 'menu') {
@@ -395,6 +431,9 @@ class Game {
 
   clearRace() {
     this.clearImpact();
+    this.replay?.reset();
+    this.emotes?.clear();
+    this.slowT = 0;
     this.sfx.musicStop();
     for (const r of this.racers) r.dispose();
     for (const e of this.entities) e.dispose();
@@ -458,6 +497,10 @@ class Game {
   toMenu(tab) {
     // 回大厅就退出联机房间 / 匹配队列，规则换回单机的
     this.net.leave();
+    clearTimeout(this.rejoinTimer);
+    this.rejoining = null;
+    this.rejoinSync = 0;
+    this.netDropped = false;
     this.netMode = false;
     this.matchPlayers = null;
     this.waitGo = false;
@@ -482,6 +525,7 @@ class Game {
     if (tab) this.ui.openTab(tab);
     this.buildLobby();
     this.sfx.silenceRide();
+    this.sfx.menuStart();
     this.camera.fov = 42;
     this.camera.updateProjectionMatrix();
   }
@@ -489,8 +533,9 @@ class Game {
   setRule(k, v) {
     // 比赛中 this.rules 是这一局的临时规则，菜单里改的始终是单机规则
     this.soloRules[k] = v;
-    if (this.rules !== this.soloRules && k === 'shadows') this.rules[k] = v;
+    if (this.rules !== this.soloRules && (k === 'shadows' || k === 'quality')) this.rules[k] = v;
     save(LS_RULES, this.soloRules);
+    if (k === 'quality') this.quality.apply();
     if (k === 'theme' || k === 'track') {
       this.trackDef = this.rules.track !== 'random' ? TRACK_MAP[this.rules.track] || null : null;
       this.themeKey = this.resolveTheme();
@@ -516,22 +561,26 @@ class Game {
   setLook(k, v) {
     this.look[k] = v;
     save(LS_LOOK, this.look);
+    if (this.netMode && !this.customRoom && this.state === 'menu') this.net.sendJson({ t: 'look', look: this.look });
     if (this.state === 'menu') this.buildLobby();
     this.syncShow();
   }
 
   // ---------- 展厅（成长 / 车库 / 角色页的背景） ----------
   // label：展台背后的全息大字，传 null 表示回到缆车大厅；
-  // gear：车库里正在看的装备，可以是还没拥有的，只用来预览
-  setShow(label, gear) {
+  // gear：车库里正在看的装备，可以是还没拥有的，只用来预览；
+  // patch：只在展台上试穿的外观字段（商城补给箱开出来的东西）
+  setShow(label, gear, patch) {
     this.showLabel = label || null;
     this.showGear = gear || null;
+    this.showPatch = patch || null;
     this.syncShow();
   }
 
   // 按当前状态进出展厅；force === false 时强制退出（开赛前调用）
   syncShow(force) {
-    const on = force !== false && !!this.showLabel && this.state === 'menu' && !this.netMode;
+    // 匹配排队时照样能逛车库、角色；只有进了自建房间的等待面板才收起展厅
+    const on = force !== false && !!this.showLabel && this.state === 'menu' && !this.customRoom;
     if (on && !this.showroom) {
       this.showroom = new Showroom();
       this.scene.add(this.showroom.group);
@@ -540,7 +589,7 @@ class Game {
     if (!room) return;
     if (on) {
       room.setLabel(this.showLabel);
-      room.setLook(this.showGear ? { ...this.look, gear: this.showGear } : this.look);
+      room.setLook({ ...this.look, ...(this.showGear ? { gear: this.showGear } : null), ...this.showPatch });
       if (!room.group.visible) {
         // 放到起点上空很高的地方，四周的山够不着
         room.group.position.set(0, this.course.height(0, 36) + 700, 36);
@@ -571,6 +620,11 @@ class Game {
 
   // 快速赛：按菜单里选的模式 / 赛道
   startTournament() {
+    if (this.seatBusy()) return;
+    if (this.netMode && !this.customRoom && this.state === 'menu') {
+      this.leavePublicQueue();
+      this.ui.toast('已取消匹配');
+    }
     this.session = { kind: 'quick', mode: this.soloRules.mode, track: this.soloRules.track };
     this.round = 1;
     this.points = new Array(8).fill(0);
@@ -579,7 +633,7 @@ class Game {
   }
 
   startRank(id) {
-    if (this.state !== 'menu') return;
+    if (this.state !== 'menu' || this.seatBusy()) return;
     if (!this.profile.rankOpen()) {
       this.ui.toast(`排位赛 Lv.${RANK_LV} 开启`, true);
       return;
@@ -604,17 +658,19 @@ class Game {
     this.ui.rankMode = spec.id;
     this.ui.racePick = 'rank';
     this.ui.showMatch(false);
-    this.ui.setQueue(true);
+    this.ui.setQueue(true, `排位 · ${spec.name}`);
     this.ui.renderTab('race');
     this.net.match(this.playerName, this.look, spec.rules.mode, spec.queue);
   }
 
   nextRace() {
     const rank = this.session && this.session.kind === 'rank' ? this.session.rank : '';
-    // 联机：打完一场接着匹配下一场；排位接着排同一项
+    // 联机：打完一场接着匹配下一场；排位接着排同一项；自己开的房间回到同一批人的新房间
     if (this.netMode) {
+      const room = this.customRoom ? this.roomId : 0;
       this.toMenu();
       if (rank) this.startRank(rank);
+      else if (room) this.enterListed({ t: 'again', id: room });
       else this.startMatch();
       return;
     }
@@ -704,6 +760,7 @@ class Game {
       track: this.trackDef ? this.trackDef.id : '',
       length: this.trackDef ? this.trackDef.length : 0,
       teamWin,
+      mateLeft: !!this.mateLeft,
       pb: !!this.ttPB,
       medal: this.ttMedal || 0,
     };
@@ -743,6 +800,7 @@ class Game {
   // roster：按发车位排好的选手名单 [{ name, look, bot, id }]；me：自己是第几个
   beginRace(newCourse, roster, me) {
     this.sfx.init();
+    this.sfx.menuStop(0.4);
     this.ui.showMenu(false);
     this.ui.showMatch(false);
     this.ui.setQueue(false);
@@ -762,18 +820,23 @@ class Game {
       // 联机时本机只负责模拟自己；房主另外负责所有机器人
       const owned = !online || mine || (!!e.bot && this.net.isHost);
       const up = e.up || (mine ? this.profile.up(e.look.gear || 'ski') : null);
-      const r = new Racer(this, i, e.look, e.name, mine, { bot: !!e.bot, owned, id: e.id || 0, up, team: this.mode.teamOf(i) });
+      const fair = !!this.session && this.session.kind === 'rank';
+      const r = new Racer(this, i, e.look, e.name, mine, { bot: !!e.bot, owned, id: e.id || 0, up, fair, team: this.mode.teamOf(i) });
       r.scDone = new Set();
       const row = Math.floor(i / 4);
       r.place(xs[i % 4], 3 + row * 4.6, 0);
       this.racers.push(r);
     }
     this.player = this.racers[me];
+    this.replay.begin(this.racers);
     this.itemRespawn = this.mode.itemRespawn;
     this.items = this.rules.items ? new Items(this) : NO_ITEMS;
     this.hazards = new Hazards(this);
     this.rep = this.newReport();
     this.rewarded = false;
+    this.mateLeft = false;
+    this.netDropped = false;
+    this.quitArmed = false;
     this.netReward = null;
     this.ttPB = false;
     this.ttMedal = 0;
@@ -797,6 +860,10 @@ class Game {
     this.state = 'countdown';
     this.countT = 3.9;
     this.lastCount = '';
+    this.upAt = -1;
+    this.upTap = false;
+    this.startWin = 0;
+    this.nitroQ = false;
     this.raceTime = 0;
     this.finishCount = 0;
     this.finishedT = 0;
@@ -821,7 +888,8 @@ class Game {
     // 联机时只是打开菜单，比赛照常进行（见 frame）
     const online = this.net.active;
     this.paused = b;
-    this.ui.showPause(b, online);
+    this.quitArmed = false;
+    this.ui.showPause(b, online || this.netDropped, online || this.netDropped ? this.quitNote() : '');
     this.sfx.musicDuck(b && !online);
     if (b && !online) this.sfx.silenceRide();
   }
@@ -853,13 +921,23 @@ class Game {
   }
 
   // ---------- 联机匹配 ----------
+  get playerName() {
+    return this.profile.data.name;
+  }
+
+  // 返回是否是合法昵称
   setName(name) {
-    this.playerName = String(name).trim().slice(0, 12);
-    save(LS_NAME, this.playerName);
+    const n = cleanNick(name);
+    if (!n) return false;
+    if (n !== this.profile.data.name) {
+      this.profile.data.name = n;
+      this.profile.save();
+    }
+    return true;
   }
 
   startMatch() {
-    if (this.state !== 'menu') return;
+    if (this.state !== 'menu' || this.seatBusy()) return;
     if (this.netMode) {
       if (!this.customRoom) this.leavePublicQueue();
       return;
@@ -877,11 +955,11 @@ class Game {
     this.customRoom = false;
     this.matchPlayers = null;
     this.ui.showMatch(false);
-    this.ui.setQueue(true);
+    this.ui.setQueue(true, MODES[mode].name);
     this.net.match(this.playerName, this.look, mode);
   }
 
-  // 公开匹配只停在首页按钮上，离开首页或再点一次都退出队列
+  // 匹配排队可以去逛其他界面；再点一次开始比赛、首页按 Esc、点提示条上的取消，或者开了别的比赛 / 房间才退出队列
   leavePublicQueue() {
     if (!this.netMode || this.customRoom) return;
     this.net.leave();
@@ -918,8 +996,11 @@ class Game {
 
   // 房间列表。只连上看列表，不进匹配队列。
   openHall() {
-    if (this.state !== 'menu') return;
-    if (this.netMode && !this.customRoom) this.leavePublicQueue();
+    if (this.state !== 'menu' || this.seatBusy()) return;
+    if (this.netMode && !this.customRoom) {
+      this.leavePublicQueue();
+      this.ui.toast('已取消匹配');
+    }
     if (this.netMode) return;
     this.customRoom = false;
     this.ui.racePick = 'hall';
@@ -934,7 +1015,7 @@ class Game {
   }
 
   enterListed(msg) {
-    if (this.state !== 'menu') return;
+    if (this.state !== 'menu' || this.seatBusy()) return;
     this.sfx.init();
     this.netMode = true;
     this.customRoom = true;
@@ -955,6 +1036,17 @@ class Game {
 
   joinListed(id) {
     this.enterListed({ t: 'join', id });
+  }
+
+  // 打开的是邀请链接（?room=房间号）：直接进那个房间
+  joinInvite() {
+    const url = new URL(location.href);
+    const id = parseInt(url.searchParams.get('room') || '', 10);
+    if (!url.searchParams.has('room')) return;
+    url.searchParams.delete('room');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+    if (!(id > 0) || this.state !== 'menu' || this.netMode) return;
+    this.joinListed(id);
   }
 
   quickListed() {
@@ -986,13 +1078,30 @@ class Game {
       this.ui.tickQueue();
       return;
     }
-    this.ui.setMatch({ players: m.players, me: this.net.id, host: m.host === this.net.id, max: m.max, reason: m.reason || 'fill' });
+    this.roomId = m.id | 0;
+    this.ui.setMatch({ players: m.players, me: this.net.id, host: m.host === this.net.id, max: m.max, reason: m.reason || 'fill', id: m.id | 0 });
   }
 
   // 服务器宣布开赛：所有人用同一个种子生成同一条赛道
   onNetStart(m) {
     if (!this.netMode) return;
     this.matchPlayers = null;
+    this.netRaceSetup(m);
+    this.beginRace(true, m.roster, m.you | 0);
+    if (m.key) save(LS_SEAT, { key: m.key, at: Date.now(), beat: Date.now(), tab: this.tabId });
+    if (this.session.kind === 'rank') {
+      // 先记一笔「排位进行中」并马上存到服务器，中途关网页的话下次打开按逃跑补扣
+      this.profile.rankBegin(this.session.rank);
+      this.account.flush();
+    }
+    // 各人机器快慢不一样，等所有人都加载完再一起倒计时
+    this.waitGo = true;
+    this.ui.tip('等待其他玩家加载赛道…', 20);
+    this.net.sendJson({ t: 'ready' });
+  }
+
+  // 按服务器给的开赛信息定好这一局的规则、赛道和场景
+  netRaceSetup(m) {
     const mode = MODES[m.rules && m.rules.mode] ? m.rules.mode : 'race';
     if (m.rules && m.rules.rank && RANK_MAP[m.rules.rank]) {
       this.session = { kind: 'rank', mode, rank: m.rules.rank, track: m.track || 'random' };
@@ -1014,11 +1123,6 @@ class Game {
       this.themeKey = THEMES[m.theme] ? m.theme : 'day';
     }
     this.round = 1;
-    this.beginRace(true, m.roster, m.you | 0);
-    // 各人机器快慢不一样，等所有人都加载完再一起倒计时
-    this.waitGo = true;
-    this.ui.tip('等待其他玩家加载赛道…', 20);
-    this.net.sendJson({ t: 'ready' });
   }
 
   onNetGo() {
@@ -1026,6 +1130,8 @@ class Game {
     this.waitGo = false;
     this.countT = 3.9;
     this.lastCount = '';
+    this.upAt = -1;
+    this.upTap = false;
     this.ui.tip('准备！', 0.8);
   }
 
@@ -1034,6 +1140,7 @@ class Game {
     if (!this.racers.length) return;
     const gone = this.racers.find((r) => r.netId === id);
     if (gone && !gone.isBot) {
+      if (this.session.kind === 'rank' && this.mode.key === 'team' && this.player && gone.team === this.player.team) this.mateLeft = true;
       gone.isBot = true;
       gone.netId = 0;
       this.ui.feed(`<span>${esc(gone.name)}</span> 离开了比赛，由机器人接管`);
@@ -1048,6 +1155,7 @@ class Game {
 
   // 断线
   onNetLost(was) {
+    if (this.rejoining && (was === 'connecting' || was === 'queue')) return this.onRejoinLost();
     if (was === 'watch' && !this.netMode) {
       this.ui.toast('房间列表断开了', true);
       return;
@@ -1067,10 +1175,301 @@ class Game {
       this.ui.setMatch({ status: was === 'connecting' ? '连接不上匹配服务器，请确认服务器已启动' : '与服务器的连接断开了', error: true });
       return;
     }
-    // 比赛中断线：其他选手全部交给本机的机器人，把这一局跑完
+    // 比赛中断线：其他选手先交给本机的机器人接着跑，同时在后台重连。
+    // 连回来了照常算成绩；一直连不回来，本局不计成绩，排位按输算、不额外扣
     this.waitGo = false;
     for (const r of this.racers) if (r !== this.player) r.takeOver(true);
-    this.ui.banner('网络断开，已转为单机继续', 'bad', 2.5);
+    // 自己已经冲线 / 出局了：照常结算
+    if (this.state === 'finished' && !this.rewarded) this.showResults();
+    if (this.rewarded) {
+      this.ui.banner('网络断开', 'bad', 2);
+      return;
+    }
+    this.netDropped = true;
+    const seat = this.loadSeat();
+    if (seat) {
+      this.ui.banner('网络断开，正在重连…', 'bad', 3);
+      this.startRejoin(seat.key, true);
+    } else this.ui.banner('网络断开，本局不计成绩', 'bad', 3);
+  }
+
+  // 联机比赛里点「退出比赛」。还没结算就走算逃跑：要点两下确认，普通匹配没奖励，排位按输再额外扣分。
+  // 掉线重连期间点退出：放弃这一局，按掉线算（排位按输，不额外扣）
+  quitRace() {
+    // 自己已经冲线 / 出局，只是结算面板还没弹出来：照常结算
+    if (this.net.active && this.state === 'finished' && !this.rewarded) this.showResults();
+    if (!(this.net.active || this.netDropped) || this.rewarded) return this.toMenu();
+    if (!this.quitArmed) {
+      this.quitArmed = true;
+      this.ui.armQuit();
+      return;
+    }
+    this.rewarded = true;
+    this.stopRejoin();
+    this.dropSeat();
+    const dropped = this.netDropped;
+    const s = this.profile.rankLeave(!dropped);
+    this.toMenu();
+    if (s) {
+      this.ui.refreshProfile();
+      this.ui.toast(dropped ? `排位按输 ${s.delta || '不扣分'}` : `中途退出排位，按逃跑扣 ${-s.delta} 分`, true);
+    }
+  }
+
+  // 联机比赛里打开菜单时的说明：现在退出会怎样
+  quitNote() {
+    if (this.netDropped && !this.rewarded) return `网络断开，正在重连。现在退出本局不计成绩${this.session.kind === 'rank' ? '，排位按输' : ''}。`;
+    const head = '联机比赛不会暂停，其他人还在跑。';
+    if (!this.net.active || this.rewarded || this.state === 'finished') return head;
+    const p = this.profile.data.rank && this.profile.data.rank.pending;
+    if (this.session.kind === 'rank' && p) {
+      const s = scoreLeave(this.profile.rankState(), p.mode, true);
+      return `${head}现在退出算逃跑：排位按输，再额外扣 ${ESCAPE_EXTRA} 分，共扣 ${s ? -s.delta : 0} 分。你的角色由机器人跑完。`;
+    }
+    return `${head}现在退出：你的角色由机器人跑完，这一局没有奖励。`;
+  }
+
+  // 上次排位没打完就关掉了网页、也没能连回去：按逃跑补扣。正在打 / 正在连回去的那一场不算
+  checkRankLeave() {
+    if (this.rejoining || this.loadSeat()) return;
+    if (this.session && this.session.kind === 'rank' && this.state !== 'menu' && !this.rewarded) return;
+    const s = this.profile.rankLeave(true);
+    if (!s) return;
+    this.ui.refreshProfile();
+    this.ui.toast(`上一场排位中途离开，按逃跑扣 ${-s.delta} 分`, true);
+  }
+
+  // ---------- 掉线重连 ----------
+  loadSeat() {
+    const s = load(LS_SEAT);
+    return typeof s.key === 'string' && s.key && Date.now() - (s.at || 0) < SEAT_MS ? s : null;
+  }
+
+  dropSeat() {
+    try {
+      localStorage.removeItem(LS_SEAT);
+    } catch {
+      /* 忽略 */
+    }
+  }
+
+  // 打开网页时：上一局联机比赛还没打完（刷新 / 关掉过网页），直接连回去。
+  // 另一个标签页正在打这一局（它每隔几秒会更新 beat）就不去抢
+  resumeSeat() {
+    const s = this.loadSeat();
+    if (s && this.state === 'menu' && (s.tab === this.tabId || Date.now() - (s.beat || 0) > 6000)) this.startRejoin(s.key, false);
+    else this.checkRankLeave();
+  }
+
+  // 上一场联机比赛还没结束：先回去，不能开新的
+  seatBusy() {
+    const s = this.rejoining ? null : this.loadSeat();
+    if (!this.rejoining && !s) return false;
+    this.ui.toast('上一场比赛还没结束', true);
+    if (s && this.state === 'menu' && (s.tab === this.tabId || Date.now() - (s.beat || 0) > 6000)) this.startRejoin(s.key, false);
+    return true;
+  }
+
+  // live：比赛画面还在、只是连接断了（本机先接着跑）；否则是重新打开网页后回去
+  startRejoin(key, live) {
+    clearTimeout(this.rejoinTimer);
+    this.rejoining = { key, live, until: Date.now() + (live ? 60000 : 10000) };
+    this.net.rejoin(key);
+  }
+
+  // 这次没连上：比赛还在、也没超时，过一会儿再试
+  onRejoinLost() {
+    const j = this.rejoining;
+    const still = j && (j.live ? this.netDropped && !this.rewarded && this.state !== 'menu' : this.state === 'menu');
+    if (still && Date.now() < j.until) {
+      clearTimeout(this.rejoinTimer);
+      this.rejoinTimer = setTimeout(() => this.rejoining === j && this.net.rejoin(j.key), 2000);
+      return;
+    }
+    this.rejoinFailed();
+  }
+
+  stopRejoin() {
+    clearTimeout(this.rejoinTimer);
+    if (this.rejoining) this.net.leave();
+    this.rejoining = null;
+  }
+
+  // 回不去了：比赛已经结束 / 位子过期 / 一直连不上
+  rejoinFailed() {
+    const j = this.rejoining;
+    this.stopRejoin();
+    this.dropSeat();
+    if (!j) return;
+    if (j.live) {
+      if (this.netDropped && !this.rewarded && this.state !== 'menu') this.ui.banner('重连失败，本局不计成绩', 'bad', 3);
+      return;
+    }
+    this.netMode = false;
+    this.ui.toast('回不到上一场比赛了', true);
+    this.checkRankLeave();
+  }
+
+  // 服务器的答复：m 为 null 表示位子已经没了
+  onNetRejoin(m) {
+    const j = this.rejoining;
+    if (!j) {
+      this.net.leave();
+      return;
+    }
+    if (!m) return this.rejoinFailed();
+    clearTimeout(this.rejoinTimer);
+    this.rejoining = null;
+    // 自己那个角色在别人那边已经由机器人跑完了（或者被淘汰了）：这一局回不去了，按掉线算
+    const mine = m.snap && Array.isArray(m.snap.r) ? m.snap.r[m.you] : null;
+    if (mine && (mine[7] > 0 || mine[8] >= 0)) {
+      this.net.leave();
+      this.dropSeat();
+      if (j.live) {
+        if (!this.rewarded) this.ui.banner('比赛已经结束，本局不计成绩', 'bad', 3);
+        return;
+      }
+      this.netMode = false;
+      const s = this.profile.rankLeave(false);
+      if (s) this.ui.refreshProfile();
+      this.ui.toast(`上一场比赛已经结束，本局不计成绩${s ? ` · 排位按输 ${s.delta || '不扣分'}` : ''}`, true);
+      return;
+    }
+    const at = (this.loadSeat() || {}).at || Date.now();
+    save(LS_SEAT, { key: m.key, at, beat: Date.now(), tab: this.tabId });
+    if (j.live) this.rejoinLive(m);
+    else this.rejoinRebuild(m);
+  }
+
+  // 本机一直在跑、只是断了一会儿：别人的角色交还给网络，自己的位置以本机为准
+  rejoinLive(m) {
+    this.netDropped = false;
+    const humans = new Set(m.humans || []);
+    const host = this.net.isHost;
+    for (const r of this.racers) {
+      if (r === this.player) continue;
+      if (r.netId && humans.has(r.netId)) r.release(false);
+      else if (host) r.takeOver(true);
+      else r.release(true);
+    }
+    if (m.state === 'loading') this.net.sendJson({ t: 'ready' });
+    else if (humans.size) this.applySnap(m.snap, false);
+    this.net.sendJson({ t: 'back' });
+    this.ui.banner('已重新连接', 'gold', 2);
+  }
+
+  // 重新打开网页后回来：照开赛信息重建这一局，再按比赛现状把每个人放回去
+  rejoinRebuild(m) {
+    this.sfx.init();
+    this.netMode = true;
+    this.customRoom = false;
+    this.matchPlayers = null;
+    this.netRaceSetup(m);
+    const humans = new Set(m.humans || []);
+    // 已经走掉的真人，现在由房主的机器人在跑
+    const roster = m.roster.map((e) => (e.bot || e.idx === m.you || humans.has(e.id) ? e : { ...e, bot: true }));
+    this.beginRace(true, roster, m.you | 0);
+    if (m.state === 'loading') {
+      this.waitGo = true;
+      this.ui.tip('等待其他玩家加载赛道…', 20);
+      this.net.sendJson({ t: 'ready' });
+      return;
+    }
+    const s = m.snap;
+    this.applySnap(s, true);
+    // 没有别人时，大家停在你离开的那一刻；有别人时，比赛一直在走
+    this.raceTime = s && Number.isFinite(s.t) ? s.t + (humans.size ? (m.age || 0) / 1000 : 0) : 0;
+    this.state = 'race';
+    this.countT = 0;
+    this.goT = 0;
+    this.ui.setCount('');
+    this.sfx.musicStart();
+    const p = this.player;
+    if (humans.size) {
+      // 别人那边一直有机器人替你跑：等房主发来它跑到的位置再接手
+      this.rejoinSync = 1.5;
+      p.state = 'ready';
+    } else this.net.sendJson({ t: 'back' });
+    this.camera.position.set(p.pos.x, p.pos.y + 3.2, p.pos.z + 8);
+    this.ui.banner('已回到比赛', 'gold', 2);
+  }
+
+  // 刚连回来：照房主那边替自己跑的机器人的位置接上（s 为 null 是等太久了，就用快照里的位置）
+  syncSelf(s) {
+    this.rejoinSync = 0;
+    const p = this.player;
+    if (s) {
+      p.pos.set(s.x, s.y, s.z);
+      p.vel.set(s.vx, s.vy, s.vz);
+      p.yaw = s.yaw;
+      p.d = -p.pos.z;
+      p.grounded = s.grounded;
+      p.trail.reset();
+    }
+    p.state = 'ski';
+    this.camera.position.set(p.pos.x, p.pos.y + 3.2, p.pos.z + 8);
+    this.net.sendJson({ t: 'back' });
+  }
+
+  // 掉线的人连回来了：他的角色从机器人手里交还给他
+  onNetBack(m) {
+    const r = this.racers[m.idx];
+    if (!r || r.isPlayer) return;
+    r.netId = m.id;
+    r.release(false);
+  }
+
+  // 比赛现状：房主每秒传给服务器一份，掉线的人连回来时照着它把各人放回去
+  raceSnap() {
+    const f = (v) => Math.round(v * 100) / 100;
+    return {
+      t: f(this.raceTime),
+      fn: this.mode.finishN || 0,
+      nx: Number.isFinite(this.mode.next) ? this.mode.next : null,
+      sc: this.mode.score.slice(),
+      r: this.racers.map((r) => [f(r.pos.x), f(r.pos.y), f(r.pos.z), f(r.vel.x), f(r.vel.y), f(r.vel.z), f(r.yaw), r.finished ? f(r.finishTime) : 0, r.out ? f(r.outAt) : -1]),
+    };
+  }
+
+  // full：重建的这一局，位置、得分一起放回去；否则只补上断线期间错过的冲线和出局
+  applySnap(s, full) {
+    if (!s || !Array.isArray(s.r)) return;
+    const num = (v) => (Number.isFinite(v) ? v : 0);
+    s.r.forEach((a, i) => {
+      const r = this.racers[i];
+      if (!r || !Array.isArray(a)) return;
+      if (full) {
+        r.pos.set(num(a[0]), num(a[1]), num(a[2]));
+        r.vel.set(num(a[3]), num(a[4]), num(a[5]));
+        r.yaw = num(a[6]);
+        r.d = -r.pos.z;
+        r.state = 'ski';
+        r.trail.reset();
+      }
+      if (r.isPlayer) return;
+      const ft = num(a[7]);
+      if (ft > 0 && !r.finished) {
+        r.finished = true;
+        r.finishTime = ft;
+        r.weapon = null;
+        r.skier.setProp(null);
+      } else if (!(ft > 0) && r.finished) {
+        r.finished = false;
+        r.finishTime = 0;
+      }
+      if (num(a[8]) >= 0 && !r.out) {
+        r.out = true;
+        r.outAt = a[8];
+        r.weapon = null;
+        r.skier.setProp(null);
+        r.skier.group.visible = false;
+      }
+    });
+    if (full && Array.isArray(s.sc)) s.sc.forEach((v, i) => i < this.mode.score.length && Number.isFinite(v) && (this.mode.score[i] = v));
+    if (full && Number.isFinite(s.fn)) this.mode.finishN = s.fn;
+    if (Number.isFinite(s.nx) && Number.isFinite(this.mode.next)) this.mode.next = Math.max(this.mode.next, s.nx);
+    this.finishCount = this.racers.filter((r) => r.finished).length;
+    this.updateOrder();
   }
 
   // 其他玩家发来的比赛事件
@@ -1088,6 +1487,14 @@ class Game {
       }
       case 'pick':
         this.items.take(m.s | 0);
+        break;
+      case 'evade': {
+        const r = R[m.i];
+        if (r && !r.owned) this.weapons.evade(r, true);
+        break;
+      }
+      case 'emo':
+        this.emotes.remote(m);
         break;
       case 'fin': {
         const r = R[m.i];
@@ -1117,11 +1524,12 @@ class Game {
   // 联机结算：自己冲线后就显示，其他人陆续冲线时名单跟着刷新
   showNetResults() {
     const p = this.player;
-    const rows = this.order.map((r, i) => ({ rank: i + 1, name: r.name, me: r.isPlayer, time: r.finished ? fmtTime(r.finishTime) : '比赛中…' }));
+    const rows = this.order.map((r, i) => ({ rank: i + 1, name: r.name, me: r.isPlayer, idx: r.idx, look: r.look, time: r.finished ? fmtTime(r.finishTime) : '比赛中…' }));
     const racing = this.racers.some((r) => !r.finished);
     // 奖励只结算一次（名单还会刷新好几回）
     if (!this.rewarded) {
       this.rewarded = true;
+      this.dropSeat();
       let teamWin = false;
       if (this.mode.key === 'team' && this.player) teamWin = this.mode.winner(this.order) === this.player.team;
       this.netReward = this.profile.applyRace(this.playerReport(p.rank, teamWin));
@@ -1138,9 +1546,34 @@ class Game {
       title,
       sub: `${rankSpec ? rankSpec.name + ' · ' : '联机 · '}${this.theme.name} · 用时 ${fmtTime(p.finishTime)} · 你击中对手 ${this.playerHits} 次，被击飞 ${p.hits} 次${racing ? ' · 还有人没冲线' : ''}`,
       rows,
-      nextLabel: rankSpec ? '继续排位 ▶' : '继续匹配 ▶',
+      nextLabel: rankSpec ? '继续排位 ▶' : this.customRoom && this.roomId ? '再来一局 ▶' : '继续匹配 ▶',
       reward: this.netReward,
+      awards: this.resultAwards(false),
     });
+  }
+
+  // 结算「本局之最」：每项挑这局最突出的一个人，数值太小的不发。
+  // 技巧分和时速只有自己机器上跑的人才准，联机时不评
+  resultAwards(local) {
+    const out = [];
+    if (this.racers.length < 2) return out;
+    const top = (key, min) => {
+      let best = null;
+      for (const r of this.racers) if (r[key] >= min && (!best || r[key] > best[key])) best = r;
+      return best;
+    };
+    const add = (icon, name, r, val) => r && out.push({ icon, name, who: r.name, me: r.isPlayer, idx: r.idx, val });
+    const k = top('knocks', 1);
+    add('💥', '击飞王', k, k && `击飞 ${k.knocks} 次`);
+    if (local) {
+      const s = top('skillPts', 1);
+      add('✨', '技巧王', s, s && `技巧 ${s.skillPts.toLocaleString()} 分`);
+      const v = top('topSpeed', 1);
+      add('🚀', '极速王', v, v && `${v.topSpeed} km/h`);
+    }
+    const d = top('downs', 2);
+    add('🎯', '人肉沙包', d, d && `被击飞 ${d.downs} 次`);
+    return out;
   }
 
   showResults() {
@@ -1162,7 +1595,7 @@ class Game {
     const last = multi && this.round >= this.rules.rounds;
     const timeOf = (r) => (r.finished ? fmtTime(r.finishTime) : r.out ? '淘汰' : '未完赛');
     let rows = stand.map((r, i) => {
-      const row = { rank: i + 1, name: r.name, me: r.isPlayer, time: timeOf(r), team: r.team };
+      const row = { rank: i + 1, name: r.name, me: r.isPlayer, idx: r.idx, look: r.look, time: timeOf(r), team: r.team };
       const col = mode.resultCol(r);
       if (col !== undefined) row.pts = col;
       if (pointsMode) {
@@ -1192,14 +1625,14 @@ class Game {
     const rankSpec = s.kind === 'rank' ? RANK_MAP[s.rank] : null;
     if (rankSpec) {
       const won = mode.key === 'team' ? teamWin : p.finished && myRank <= 3;
-      title = `${won ? '胜利' : '失败'} · ${rankSpec.name}`;
+      title = `${this.netDropped ? '掉线' : won ? '胜利' : '失败'} · ${rankSpec.name}`;
       if (mode.key !== 'team') title += ` · 第 ${myRank} 名`;
       nextLabel = '继续排位 ▶';
     }
     if (last) {
       const tot = this.racers.slice().sort((a, b) => this.points[b.idx] - this.points[a.idx]);
       const mr = tot.indexOf(p) + 1;
-      rows = tot.map((r, i) => ({ rank: i + 1, name: r.name, me: r.isPlayer, time: '', pts: `${this.points[r.idx]} 分` }));
+      rows = tot.map((r, i) => ({ rank: i + 1, name: r.name, me: r.isPlayer, idx: r.idx, look: r.look, time: '', pts: `${this.points[r.idx]} 分` }));
       title = `锦标赛总排名 第 ${mr} 名${mr === 1 ? ' 🏆' : ''}`;
       sub = `冠军：${tot[0].name}（${this.points[tot[0].idx]} 分）`;
       nextLabel = '再来一届 ▶';
@@ -1233,14 +1666,24 @@ class Game {
     }
 
     let reward = null;
-    if (!this.rewarded) {
+    if (!this.rewarded && this.netDropped) {
+      // 掉线后一直没连回来，自己跑完了：不计成绩，排位按输
       this.rewarded = true;
+      this.stopRejoin();
+      this.dropSeat();
+      const r = this.profile.rankLeave(false);
+      if (r) this.ui.refreshProfile();
+      sub = `网络断开，本局不计成绩${r ? ` · 排位按输 ${r.delta || '不扣分'}` : ''} · ${sub}`;
+    } else if (!this.rewarded) {
+      this.rewarded = true;
+      this.dropSeat();
       const rep = this.playerReport(myRank, teamWin);
       rep.extra = extra;
       reward = this.profile.applyRace(rep);
       this.ui.refreshProfile();
     }
-    this.ui.showResults({ title, sub, rows, nextLabel, reward, backLabel: '返回大厅' });
+    const awards = mode.key === 'tt' || last ? null : this.resultAwards(true);
+    this.ui.showResults({ title, sub, rows, nextLabel, reward, backLabel: '返回大厅', awards });
   }
 
   // ---------- 回调 ----------
@@ -1282,11 +1725,15 @@ class Game {
     if (!fromNet) this.net.ev('kn', { v: victim.idx, s: source ? source.idx : -1, c: cause, f: frozen ? 1 : 0 });
     this.mode.onKnock(victim, source, frozen);
     if (source && source.owned && victim !== source && !source.out && !source.finished) source.chain.add(frozen ? '冻住对手' : '击中对手', 150);
+    if (source && victim !== source) source.knocks++;
+    victim.downs++;
     const rep = this.rep;
     if (source && source.isPlayer && victim !== source) {
       rep.hits++;
       rep.hitsBy[cause] = (rep.hitsBy[cause] || 0) + 1;
+      this.replay.mark('ko', victim, 3, frozen);
     }
+    this.emotes.react(victim, source);
     if (victim.isPlayer) {
       rep.knocked++;
       rep.knockedBy[cause] = (rep.knockedBy[cause] || 0) + 1;
@@ -1467,6 +1914,12 @@ class Game {
   // 一次腾空落地，做成了哪些动作（parts：动作名；grab：成功的抓板时长，没有为 0）
   onLanded(r, parts, grab) {
     if (!r.isPlayer) return;
+    let big = 0;
+    for (const s of parts) {
+      const m = s.match(/×(\d+)|转体 (\d+)/);
+      big += m ? (m[1] ? +m[1] : +m[2] / 360) : 1;
+    }
+    if (big >= 2) this.replay.mark('trick', r, 1 + big * 0.4);
     if (grab > 0) {
       this.rep.grabs++;
       this.rep.maxGrab = Math.max(this.rep.maxGrab, grab);
@@ -1492,6 +1945,7 @@ class Game {
   onChainBank(r, total, mult, n) {
     this.mode.onChainBank(r, total, mult, n);
     if (mult >= 3 && this.nearCamera(r.pos, 130)) this.fx.ring(r.pos, 3 + mult * 0.4, 0xffd23c, 0.4);
+    r.skillPts += total;
     if (!r.isPlayer) return;
     const rep = this.rep;
     rep.skill += total;
@@ -1533,6 +1987,36 @@ class Game {
     this.sfx.tone('sine', 520, 1040, 0.12, 0.18);
   }
 
+  onNitro(r) {
+    if (this.nearCamera(r.pos, 110)) this.fx.ring(r.pos, 3, 0x3fa8ff, 0.3);
+    if (!r.isPlayer) return;
+    this.sfx.whoosh(1);
+    this.sfx.tone('sawtooth', 180, 720, 0.35, 0.16);
+  }
+
+  onStartBoost(r, perfect) {
+    if (this.nearCamera(r.pos, 110)) this.fx.ring(r.pos, perfect ? 3.5 : 2.5, perfect ? 0xffd23c : 0x7fe0ff, 0.3);
+    if (!r.isPlayer) return;
+    this.ui.chainPop(perfect ? '完美起步' : '起步喷射', '', perfect ? 'gold' : 'good');
+    this.sfx.whoosh(perfect ? 1 : 0.7);
+    this.sfx.tone('triangle', 520, perfect ? 1560 : 1040, 0.25, 0.25);
+  }
+
+  // 从尾流里闪出来
+  onDraft(r) {
+    if (!r.isPlayer) return;
+    this.sfx.whoosh(0.7);
+    this.sfx.tone('sine', 440, 880, 0.15, 0.14);
+  }
+
+  // 甩掉了追踪导弹
+  onEvade(r) {
+    if (this.nearCamera(r.pos, 110)) this.fx.ring(r.pos, 4, 0xffd23c, 0.3);
+    if (!r.isPlayer) return;
+    this.ui.chainPop('甩掉导弹', '', 'good');
+    this.sfx.tone('triangle', 880, 1760, 0.18, 0.25);
+  }
+
   // 抄近道成功（滑上近道里的冰面就算）
   updateShortcuts() {
     for (const r of this.racers) {
@@ -1551,6 +2035,11 @@ class Game {
 
   // ---------- 输入 ----------
   bindInput() {
+    const arm = () => {
+      this.sfx.init();
+      if (this.state === 'menu') this.sfx.menuStart();
+    };
+    window.addEventListener('pointerdown', arm);
     const map = {
       KeyA: 'left', ArrowLeft: 'left', a: 'left', A: 'left',
       KeyD: 'right', ArrowRight: 'right', d: 'right', D: 'right',
@@ -1563,10 +2052,12 @@ class Game {
     const act = (e) => map[e.code] || map[e.key];
     const is = (e, ...names) => names.includes(e.code) || names.includes(e.key);
     window.addEventListener('keydown', (e) => {
+      arm();
       // 正在输入昵称：别把字母当成游戏按键
       if (e.target && e.target.tagName === 'INPUT') return;
       const a = act(e);
       if (a) {
+        if (a === 'up' && !this.keys.up) this.noteUp();
         this.keys[a] = true;
         if (this.state !== 'menu') e.preventDefault();
         return;
@@ -1580,8 +2071,12 @@ class Game {
           else this.jumpQ = true;
         }
         if (this.state !== 'menu') e.preventDefault();
-      } else if (is(e, 'KeyJ', 'KeyF', 'KeyK', 'j', 'f', 'k', 'J', 'F', 'K')) {
+      } else if (is(e, 'KeyJ', 'KeyF', 'j', 'f', 'J', 'F')) {
         if (racing) this.fireQ = true;
+      } else if (is(e, 'KeyK', 'KeyC', 'k', 'c', 'K', 'C')) {
+        if (racing) this.nitroQ = true;
+      } else if (/^Digit[1-4]$/.test(e.code) || /^Numpad[1-4]$/.test(e.code)) {
+        if (!this.paused) this.emotes.send(+e.code.slice(-1) - 1);
       } else if (is(e, 'KeyR', 'r', 'R')) {
         if (racing && this.player && !this.player.finished) this.player.respawn();
       } else if (is(e, 'Escape')) {
@@ -1589,6 +2084,7 @@ class Game {
       } else if (is(e, 'KeyM', 'm', 'M')) {
         this.sfx.setMuted(!this.sfx.muted);
         if (this.state !== 'menu') this.tip(this.sfx.muted ? '🔇 已静音' : '🔊 声音开启');
+        else if (this.ui.tab === 'set') this.ui.renderTab('set');
       }
     });
     window.addEventListener('keyup', (e) => {
@@ -1600,9 +2096,28 @@ class Game {
       for (const k in this.keys) this.keys[k] = false;
       this.spaceFlip = false;
     });
-    document.getElementById('c').addEventListener('mousedown', (e) => {
-      if (e.button === 0 && this.state === 'race' && !this.paused) this.fireQ = true;
+    const canvas = document.getElementById('c');
+    canvas.addEventListener('mousedown', (e) => {
+      // 触屏点画面也会补发一个 mousedown，不能当成开火
+      if (this.state !== 'race' || this.paused || this.autoTuck) return;
+      if (e.button === 0) this.fireQ = true;
+      else if (e.button === 2) this.nitroQ = true;
     });
+    canvas.addEventListener('contextmenu', (e) => {
+      if (this.state !== 'menu') e.preventDefault();
+    });
+  }
+
+  // 按下 W：倒计时里记下离“冲”还有几秒；刚喊完“冲”才按的，给个普通起步
+  // tap：触屏点了一下（触屏是自动俯冲，不用按住）
+  noteUp(tap = false) {
+    if (this.state === 'countdown' && !this.waitGo) {
+      this.upAt = this.countT - 0.9;
+      this.upTap = tap;
+    } else if (this.state === 'race' && this.startWin && this.time < this.startWin && this.player && this.player.owned) {
+      this.startWin = 0;
+      this.player.startBoost(false);
+    }
   }
 
   readInput(dt) {
@@ -1612,7 +2127,7 @@ class Game {
     const rate = (target === 0 ? 8 : 5.5) * dt;
     this.steer += clamp(target - this.steer, -rate, rate);
     p.input.steer = this.steer;
-    p.input.tuck = k.up;
+    p.input.tuck = k.up || (this.autoTuck && !k.down);
     p.input.brake = k.down;
     p.input.drift = k.drift;
     if (p.grounded) this.spaceFlip = false;
@@ -1636,6 +2151,10 @@ class Game {
       this.fireQ = false;
       if (p.weapon) this.weapons.use(p);
     }
+    if (this.nitroQ) {
+      this.nitroQ = false;
+      p.useNitro();
+    }
   }
 
   // ---------- 每帧 ----------
@@ -1643,17 +2162,32 @@ class Game {
     // 联机时宁可一步走长一点（updateRace 里会再切小步），也别让自己的时间比别人慢
     const dt = Math.min(this.clock.getDelta(), this.net.active ? 0.1 : 0.05);
     this.frameAt = performance.now();
+    this.quality.sample();
     this.sfx.wake();
     // 联机比赛停不下来：打开菜单时游戏照常推进
-    if (!this.paused || this.net.active) this.update(dt);
-    this.renderer.render(this.scene, this.camera);
+    if (!this.paused || this.net.active) {
+      let sim = dt;
+      if (this.slowT > 0) {
+        this.slowT -= dt;
+        sim *= this.slowT > 0.3 ? 0.3 : 1 - (Math.max(0, this.slowT) / 0.3) * 0.7;
+      }
+      this.update(sim);
+      this.replay.frame(dt);
+    }
+    this.renderer.render(this.scene, this.replay.on ? this.replay.cam : this.camera);
     this.renderImpact();
   }
 
   update(dt) {
     this.time += dt;
-    if (this.state === 'menu') this.updateLobby(dt);
-    else if (this.state === 'countdown') this.updateCountdown(dt);
+    if (this.state === 'menu') {
+      this.updateLobby(dt);
+      // 排队时人可能在车库、商城这些展厅页面，计时放在这里每帧都走
+      if (this.netMode) {
+        if (!this.customRoom) this.ui.tickQueue();
+        else if (this.matchPlayers) this.ui.tickMatch(this.matchEnd - performance.now());
+      }
+    } else if (this.state === 'countdown') this.updateCountdown(dt);
     else this.updateRace(dt);
     if (this.course) this.course.update(dt);
     this.fx.update(dt);
@@ -1661,12 +2195,16 @@ class Game {
     this.clouds.rotation.y += dt * 0.004;
     if (this.aurora.visible) this.auroraTex.offset.x += dt * 0.012;
     if (this.snowfall) this.snowfall.update(dt, this.camera.position);
-    if (this.state !== 'menu') this.ui.update(dt);
+    if (this.state !== 'menu') {
+      this.ui.update(dt);
+      this.hud.update(dt);
+      this.emotes.update(dt);
+    }
     this.updateImpact(dt);
   }
 
   focusShadow(pos) {
-    this.sun.castShadow = !!this.rules.shadows;
+    this.sun.castShadow = !!this.rules.shadows && this.quality.shadows;
     this.sun.position.copy(pos).addScaledVector(this.sunDir, 240);
     this.sun.target.position.copy(pos);
     this.sun.target.updateMatrixWorld();
@@ -1727,10 +2265,6 @@ class Game {
     cam.position.y = Math.max(cam.position.y, this.course.height(cam.position.x, cam.position.z) + 1.5);
     cam.lookAt(ax, ay, g.z);
     this.focusShadow(g);
-    if (this.netMode && this.state === 'menu') {
-      if (!this.customRoom) this.ui.tickQueue();
-      else if (this.matchPlayers) this.ui.tickMatch(this.matchEnd - performance.now());
-    }
   }
 
   updateCountdown(dt) {
@@ -1763,6 +2297,14 @@ class Game {
         if (!r.owned) continue; // 别人的角色等他自己出发
         r.state = 'ski';
         r.vel.set(0, 0, -5 - Math.random() * 2);
+        if (r.isBot && Math.random() < BOT_START[this.rules.difficulty]) r.startBoost(Math.random() < 0.5);
+      }
+      const p = this.player;
+      this.startWin = this.time + START_LATE;
+      if (p && p.owned && (this.keys.up || this.upTap)) {
+        // 早就按住不放的不算
+        if (this.upAt >= 0 && this.upAt <= START_PERFECT) p.startBoost(true);
+        this.startWin = 0;
       }
     }
     this.net.tick();
@@ -1796,7 +2338,13 @@ class Game {
     r.skier.setProp(null);
     r.boostT = 0;
     if (this.nearCamera(r.pos, 200)) this.confetti(r.pos);
+    // 冲线前后 0.8 秒内有人一起冲线，回放里优先放这一下
+    const p = this.player;
+    const close = (a) => this.racers.some((o) => o !== a && o.finished && Math.abs(o.finishTime - a.finishTime) < 0.8);
+    if (r.isPlayer) this.replay.mark('fin', r, close(r) ? 2.2 : 1);
+    else if (p && p.finished && close(p)) this.replay.bump('fin', 2.2);
     if (r.isPlayer) {
+      if (!this.net.active) this.slowT = FINISH_SLOW;
       this.updateOrder();
       this.state = 'finished';
       this.finishedT = 0;
@@ -1811,6 +2359,19 @@ class Game {
     if (this.goT > 0) {
       this.goT -= dt;
       if (this.goT <= 0) this.ui.setCount('');
+    }
+    if (this.rejoinSync > 0) {
+      this.rejoinSync -= dt;
+      if (this.rejoinSync <= 0) this.syncSelf(null);
+    }
+    // 告诉别的标签页：这一局有人在打
+    if ((this.net.active || this.netDropped) && !this.rewarded) {
+      this.seatBeatT = (this.seatBeatT || 0) + dt;
+      if (this.seatBeatT > 2) {
+        this.seatBeatT = 0;
+        const seat = this.loadSeat();
+        if (seat) save(LS_SEAT, { ...seat, beat: Date.now(), tab: this.tabId });
+      }
     }
     // 窗口在后台时一步可能很长（见 initBackgroundTick），多切几小步保证物理稳定
     const steps = dt > 0.05 ? Math.ceil(dt / 0.025) : dt > 0.02 ? 2 : 1;
@@ -1849,7 +2410,10 @@ class Game {
     }
     this.net.tick();
     this.updateOrder();
-    if (this.state === 'race' || this.state === 'finished') this.updateShortcuts();
+    if (this.state === 'race' || this.state === 'finished') {
+      this.updateShortcuts();
+      for (const r of this.racers) if (r.owned && !r.finished && r.state === 'ski' && r.grounded) r.topSpeed = Math.max(r.topSpeed, Math.round(r.vel.length() * 3.6));
+    }
     const p0 = this.player;
     if (p0 && this.state === 'race') {
       const rep = this.rep;
@@ -1966,7 +2530,7 @@ class Game {
       const gh = course.height(_v2.x, _v2.z) + 1.0;
       _v2.y = lerp(_v2.y, gh, 0.6);
       cam.lookAt(_v2);
-      targetFov = 60 + Math.min(p.speed, 62) * 0.42 + (p.boostT > 0 ? 8 : 0);
+      targetFov = 60 + Math.min(p.speed, 62) * 0.42 + (p.boostT > 0 || p.nitroT > 0 ? 8 : 0);
     }
     const sh = this.fx.shake;
     if (sh > 0.01) {

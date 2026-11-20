@@ -62,7 +62,7 @@ export const WEAPONS = {
   boost:     { name: '氮气加速', icon: '🔥', ammo: 1, w: [3, 8, 12],  prop: null,   ai: 'self' },
   shield:    { name: '护盾',     icon: '🛡️', ammo: 1, w: [10, 6, 4],  prop: null,   ai: 'self' },
   punch:     { name: '拳击手套', icon: '🥊', ammo: 2, w: [7, 5, 3],   prop: null,   ai: 'melee' },
-  hook:      { name: '钩爪',     icon: '🪝', ammo: 1, w: [0, 6, 9],   prop: 'gun',  ai: 'anyAhead' },
+  hook:      { name: '钩爪',     icon: '⚓', ammo: 1, w: [0, 6, 9],   prop: 'gun',  ai: 'anyAhead' },
   bigball:   { name: '巨型雪球', icon: '☃️', ammo: 1, w: [3, 6, 6],   prop: null,   ai: 'anyAhead' },
 };
 export const WEAPON_KEYS = Object.keys(WEAPONS);
@@ -113,6 +113,7 @@ export const DEFAULT_RULES = {
   itemRate: 1, // 0 稀少 1 正常 2 密集
   banned: [], // 被禁用的武器 id
   shadows: true,
+  quality: 'auto', // auto / high / mid / low
 };
 
 export const POINTS = [10, 8, 6, 5, 4, 3, 2, 1];

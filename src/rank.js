@@ -76,6 +76,8 @@ export function scoreRank(state, rep) {
     if (place === 1) delta += 8;
     else if (win && (rep.hits | 0) >= 2) delta += 4;
   }
+  // 组队时有队友中途走了，剩下的人输了只扣一半
+  if (!win && delta < 0 && spec.id !== 'solo' && rep.mateLeft) delta = Math.ceil(delta / 2);
   const today = localDay();
   const first = win && state.day !== today;
   if (first) delta += 8;
@@ -85,9 +87,26 @@ export function scoreRank(state, rep) {
   return { delta: after - before, win, before, after, first, name: spec.name };
 }
 
+export const ESCAPE_EXTRA = 10;
+
+// 没打完就离开：按输、最后一名算。主动退出算逃跑，再多扣 ESCAPE_EXTRA，也不享受青铜和刚升段的保护；掉线只按输算
+export function scoreLeave(state, rankMode, escape) {
+  const spec = RANK_MAP[rankMode];
+  if (!spec) return null;
+  const before = Math.max(0, state.pts | 0);
+  const tier = tierAt(before);
+  let delta = spec.id === 'solo' ? -18 : spec.id === 'team' ? -12 : -10;
+  if (escape) delta -= ESCAPE_EXTRA;
+  else if (tier.index === 0) delta = 0;
+  else if (before - tier.min < 20) delta = Math.max(delta, tier.min - before);
+  const after = Math.max(0, before + delta);
+  return { delta: after - before, win: false, before, after, first: false, name: spec.name };
+}
+
+// 今日首胜按北京时间换天（和每日任务一样），服务器重算时对得上
 function localDay() {
-  const d = new Date();
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  const d = new Date(Date.now() + 8 * 3600000);
+  return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
 }
 
 export function sameDay(day) {
