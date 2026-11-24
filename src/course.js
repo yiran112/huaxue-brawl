@@ -685,6 +685,12 @@ export class Course {
     return 0;
   }
 
+  practicePowder(x, d) {
+    const edge = this.halfWidth(d) * (0.55 + 0.045 * Math.sin(d * 0.026));
+    const off = Math.abs(x - this.cx(d));
+    return smooth(edge - 1, edge + 2.6, off) * smooth(20, 68, d);
+  }
+
   // 压到加速带就返回那一块
   padAt(x, d) {
     const P = this.pads;
@@ -721,6 +727,7 @@ export class Course {
   slope(d) {
     const p = this.p;
     let s = 0.3 + 0.1 * Math.sin(d * 0.0071 + p[0]) + 0.07 * Math.sin(d * 0.0173 + p[1]) + 0.035 * Math.sin(d * 0.041 + p[2]);
+    if (this.def?.practice) s = 0.24 + 0.037 * Math.sin(d / 58) + 0.033 * Math.sin(d / 126);
     // 断崖：先放平成一段平台，再陡降
     const D = this.drops;
     for (let i = 0; i < D.length; i++) {
@@ -742,6 +749,7 @@ export class Course {
 
   // 基准线（不含岔路绕行）
   meander(d) {
+    if (this.def?.practice) return 30 * Math.sin((d - 52) * TAU / 440) * smooth(52, 153, d);
     const p = this.p;
     const r = smooth(60, 300, d) * (1 - smooth(this.L - 300, this.L - 80, d));
     if (r <= 0) return 0;
@@ -767,6 +775,7 @@ export class Course {
   halfWidth(d) {
     const p = this.p;
     let w = 27 + 8 * Math.sin(d * 0.0063 + p[5]) + 4 * Math.sin(d * 0.019 + p[6]);
+    if (this.def?.practice) w = 20 + 1.5 * Math.sin(d / 120);
     w = lerp(22, w, smooth(-20, 140, d));
     w = lerp(w, 13, smooth(this.L - 170, this.L - 50, d));
     w = lerp(w, 30, smooth(this.L + 8, this.L + 70, d));
@@ -1010,6 +1019,7 @@ export class Course {
     const pos = new Float32Array(rows * cols * 3);
     const us = new Float32Array(rows * cols);
     const tint = new Uint8Array(rows * cols);
+    const practiceUV = this.def?.practice ? new Float32Array(rows * cols * 4) : null;
     let k = 0;
     for (let i = 0; i < rows; i++) {
       const d = rowD[i];
@@ -1037,6 +1047,14 @@ export class Course {
         pos[k * 3 + 2] = z;
         us[k] = this.offTrack(x, d);
         tint[k] = this.tintAt(x, d);
+        if (practiceUV) {
+          const powder = this.practicePowder(x, d);
+          const coverage = smooth(4, 27, d) * (1 - smooth(1, 9, this._um));
+          practiceUV[k * 4] = x - c;
+          practiceUV[k * 4 + 1] = d;
+          practiceUV[k * 4 + 2] = (1 - powder) * coverage;
+          practiceUV[k * 4 + 3] = powder * coverage;
+        }
         k++;
       }
     }
@@ -1089,6 +1107,12 @@ export class Course {
       else if (tc === 5) tmp.lerp(rollCol, 0.5);
       else if (tc === 6) tmp.copy(lakeCol).lerp(lakeCol2, smooth(0.35, 0.75, this.noise(x * 0.07 + 3, z * 0.25)));
       else if (tc === 7) tmp.lerp(powderCol, 0.5).multiplyScalar(0.86 + 0.16 * this.noise(x * 0.45 + 9, z * 0.45));
+      if (practiceUV) {
+        const drift = practiceUV[i * 4 + 3];
+        const wind = this.noise(x * 0.26, z * 0.14);
+        tmp.lerp(powderCol, drift * (0.2 + wind * 0.65));
+        tmp.multiplyScalar(1 - practiceUV[i * 4 + 2] * 0.09 - drift * wind * 0.045);
+      }
       const shade = 0.95 + 0.05 * this.noise(x * 0.2, z * 0.2);
       col[i * 3] = tmp.r * shade;
       col[i * 3 + 1] = tmp.g * shade;
@@ -1096,6 +1120,24 @@ export class Course {
     }
     const colAttr = new THREE.BufferAttribute(col, 3);
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const practiceAttr = practiceUV && new THREE.BufferAttribute(practiceUV, 4);
+    if (practiceAttr) {
+      // 沟纹跟着雪道中线走，远处随像素覆盖面积淡出，避免高速时闪烁。
+      mat.onBeforeCompile = (shader) => {
+        shader.vertexShader = 'attribute vec4 practiceSnow; varying vec4 vPracticeSnow;\n' +
+          shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPracticeSnow = practiceSnow;');
+        shader.fragmentShader = 'varying vec4 vPracticeSnow;\n' +
+          shader.fragmentShader.replace('#include <color_fragment>', `
+            #include <color_fragment>
+            float grooves = vPracticeSnow.x / 0.34;
+            float filterWidth = fwidth(grooves);
+            float rib = cos(grooves * 6.2831853) * (1.0 - smoothstep(0.17, 0.53, filterWidth));
+            float lanes = cos(vPracticeSnow.x * 1.6) * 0.028;
+            float ripples = sin(vPracticeSnow.x * 1.1 + sin(vPracticeSnow.y * 0.20) * 1.9) * 0.032;
+            diffuseColor.rgb *= 1.0 + vPracticeSnow.z * (rib * 0.115 + lanes) + vPracticeSnow.w * ripples;
+          `);
+      };
+    }
     // 沿下坡方向切成若干段：各段共用同一份顶点数据，只是索引不同，各自带包围球，镜头外（主要是身后）的段不画
     this.terrainChunks = [];
     const strip = (cols - 1) * 6;
@@ -1107,6 +1149,7 @@ export class Course {
       geo.setAttribute('position', posAttr);
       geo.setAttribute('normal', nor);
       geo.setAttribute('color', colAttr);
+      if (practiceAttr) geo.setAttribute('practiceSnow', practiceAttr);
       geo.setIndex(new THREE.BufferAttribute(idx.slice(r0 * strip, r1 * strip), 1));
       box.makeEmpty();
       for (let i = r0 * cols; i < (r1 + 1) * cols; i++) box.expandByPoint(p.fromArray(pos, i * 3));
@@ -1238,7 +1281,7 @@ export class Course {
     // 赛道内的障碍
     let od = 240;
     while (od < this.L - 240) {
-      if (!this.nearSpecial(od)) {
+      if (!this.def?.practice && !this.nearSpecial(od)) {
         const w = this.halfWidth(od);
         const c = this.cx(od);
         const count = 1 + Math.floor(rng() * 2.4);

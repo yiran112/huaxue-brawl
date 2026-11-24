@@ -21,6 +21,11 @@
   #posTotal { font-size: 34px; margin-left: 4px; }
   #timer { position: absolute; left: 32px; top: 118px; font-size: 26px; font-weight: 900; font-variant-numeric: tabular-nums; }
   #round { position: absolute; left: 32px; top: 152px; font-size: 16px; font-weight: 700; opacity: .9; }
+  #hud.practice #timer { top: 22px; }
+  #hud.practice #round { top: 54px; }
+  #hud.practice :is(#progress, #side, #hint, #nitro, #trickPop) { display: none; }
+  #practiceHint { display: none; }
+  body:not(.touch) #hud.practice #practiceHint { display: block; position: absolute; bottom: 12px; left: 0; right: 0; text-align: center; font-size: 12px; opacity: .75; }
   #speed { position: absolute; right: 30px; bottom: 24px; font-size: 20px; font-weight: 900; font-style: italic; text-align: right; }
   #speed b { font-size: 60px; font-variant-numeric: tabular-nums; }
   #side { position: absolute; right: 22px; top: 20px; width: 190px; }
@@ -505,6 +510,7 @@
   .rsel b { flex: none; font-size: 20px; font-weight: 900; font-style: italic; }
   .rsel small { min-width: 0; font-size: 12px; font-weight: 700; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .rchips, .rmed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .rpractice { flex-basis: 100%; }
   .rchips label, .rmed label { margin-right: 2px; font-size: 12px; font-weight: 900; opacity: .7; }
   .rchips button { padding: 5px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; background: rgba(255, 255, 255, .1); }
   .rchips button:hover { background: rgba(255, 255, 255, .2); }
@@ -1134,6 +1140,7 @@
   <div id="nitro"><span class="nn"></span><span class="nn"></span><div class="nb"><i></i></div></div>
   <div id="alerts"></div>
   <div id="hint" class="stroke">A/D 转向 · W 俯冲 · S 刹车 · Shift 漂移 · 空格 跳（空中按住翻跟头）· 空中 Shift+A/D 转体 · 空中 S 抓板 · J 用道具 · K 氮气 · 1~4 表情 · R 复位 · Esc 暂停</div>
+  <div id="practiceHint" class="stroke">A/D 转向 · Shift + A/D 漂移 · S 刹车 · Esc 暂停</div>
 </div>
 
 <div id="menu" class="overlay">
@@ -1184,6 +1191,7 @@
     <div class="btnRow">
       <button class="btn" id="btnLobby">返回大厅</button>
       <button class="btn hidden" id="btnReplay">精彩回放</button>
+      <button class="btn hidden" id="btnPracticeSwap"></button>
       <button class="btn go" id="btnNext" style="font-size:22px;padding:12px">再来一局 ▶</button>
     </div>
   </div>

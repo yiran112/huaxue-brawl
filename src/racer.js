@@ -60,7 +60,13 @@ export class Racer {
     this.vis = { steer: 0, tuck: false, brake: false }; // 这一帧的姿态（发给别人用）
     this.skier = new Skier(look);
     game.scene.add(this.skier.group);
-    this.trail = new Trail(game.scene, trailColor(look) ?? game.trailColor);
+    this.ride = game.course.def?.practice
+      ? { board: this.skier.form === 'board', edge: 0, skid: 0, powder: 0 }
+      : null;
+    this.trail = this.ride
+      ? new Trail(game.scene, 0x4267a5, 170, this.ride.board ? 'board' : 'skis')
+      : new Trail(game.scene, trailColor(look) ?? game.trailColor);
+    this.scrapeTrail = this.ride ? new Trail(game.scene, 0x829cc4, 170, 'scrape') : null;
     // 装备属性（改装等级由调用方给）、队伍（-1 不分队）、是否已被淘汰
     this.gear = look.gear || 'ski';
     this.mods = gearMods(this.gear, opt.up, !!opt.fair);
@@ -164,6 +170,13 @@ export class Racer {
     this.grounded = true;
     this.d = -z;
     this.trail.reset();
+    if (this.ride) {
+      this.scrapeTrail.reset();
+      this.ride.edge = 0;
+      this.ride.skid = 0;
+      this.ride.powder = 0;
+      this.sprayAcc = 0;
+    }
     this.skier.spin.quaternion.identity();
   }
 
@@ -498,6 +511,7 @@ export class Racer {
     this.inShort = course._us < 1.5 && course._um > 1 ? course._br : null;
     this.onIce = !!this.inShort && course._us < 0 && this.d > this.inShort.dIce;
     this.surf = course.zones.length ? course.surfaceKind(this.pos.x, this.d) : 0;
+    if (this.ride) this.ride.powder = course.practicePowder(this.pos.x, this.d);
     const mods = this.mods;
     this.updateDraft(dt);
     if (this.isBot && !this.finished) this.think(dt);
@@ -602,6 +616,7 @@ export class Racer {
         if (off > 0 && vF > 10) acc -= Math.min(off, 14) * 1.0;
         // 道内的深雪区
         if (this.surf === 2 && vF > 8) acc -= 7 * mods.powder;
+        if (this.ride && vF > 6) acc -= Math.min(5.5, (vF - 6) * 0.5) * this.ride.powder * mods.powder;
         // 冻成冰坨：很快慢下来，只能慢吞吞地往下出溜
         if (this.frozenT > 0 && vF > 8) acc -= 16;
         if (brake) {
@@ -994,6 +1009,15 @@ export class Racer {
   }
 
   syncVisual(dt, steer = 0, tuck = false, brake = false) {
+    const ride = this.ride;
+    const skiing = this.grounded && this.state === 'ski';
+    if (ride) {
+      const contact = skiing ? clamp(this.speed / 12, 0, 1) : 0;
+      const edge = clamp(steer, -1, 1) * contact * (this.drifting || brake ? 0.52 : 1);
+      const skid = this.drifting ? this.driftDir * clamp(0.46 + this.slip / 17, 0, 1) : brake ? Math.sign(steer || 1) * 0.48 : 0;
+      ride.edge = lerp(ride.edge, edge, damp(Math.sign(ride.edge) === Math.sign(edge) ? 9 : 16, dt));
+      ride.skid = lerp(ride.skid, skid * contact, damp(13, dt));
+    }
     const g = this.skier.group;
     const tumbling = this.state === 'tumble';
     g.position.copy(this.pos);
@@ -1039,17 +1063,18 @@ export class Racer {
       hasProp: !!(this.weapon && WEAPONS[this.weapon].prop),
       boost: this.boostT > 0 || this.turboT > 0 || this.nitroT > 0,
       grab: this.grabbing && !tumbling,
+      ride,
     });
     this.skier.shield.visible = this.shieldT > 0;
     if (this.shieldT > 0) this.skier.shield.material.opacity = this.shieldT < 1 ? 0.12 + 0.2 * Math.abs(Math.sin(this.t * 14)) : 0.28;
     this.skier.ice.visible = this.frozenT > 0;
     g.visible = this.invulnT > 0 && this.state === 'ski' && !this.finished ? Math.floor(this.t * 16) % 2 === 0 : true;
 
-    const skiing = this.grounded && this.state === 'ski';
-    this.trail.add(this.pos, this.right, this.normal, skiing);
+    if (ride) this.practiceSnowFX(dt, skiing);
+    else this.trail.add(this.pos, this.right, this.normal, skiing);
 
     // 溅雪
-    if (skiing && this.speed > 6 && this.game.nearCamera(this.pos, 130)) {
+    if (!ride && skiing && this.speed > 6 && this.game.nearCamera(this.pos, 130)) {
       const amount = this.slip * 0.9 + (brake ? 8 : 0) + this.speed * 0.05;
       this.sprayAcc += amount * dt * 3;
       let n = 0;
@@ -1089,6 +1114,45 @@ export class Racer {
         );
       }
     }
+  }
+
+  practiceSnowFX(dt, skiing) {
+    const { board, edge, skid, powder } = this.ride;
+    const scraping = Math.abs(skid);
+    const cut = Math.abs(edge);
+    const riding = skiing && this.speed > 3;
+    const broad = Math.max(scraping, powder * 0.85);
+    const course = this.game.course;
+    _v.copy(this.pos);
+    if (board) _v.addScaledVector(this.right, edge * 0.15);
+    _v.y = course.surfaceY(_v.x, _v.z);
+    this.trail.add(_v, this.right, this.normal, riding && broad < 0.7, board ? 0.26 : 0.36,
+      (0.75 + cut * 0.55) * (1 - broad));
+    _v.copy(this.pos);
+    _v.y = course.surfaceY(_v.x, _v.z);
+    _x.set(-this.vel.z, 0, this.vel.x).normalize();
+    this.scrapeTrail.add(_v, _x, this.normal, riding && broad > 0.17, 0.3 + broad * 0.7, broad * 1.15);
+    if (!riding) return;
+
+    const speed = Math.min(this.speed / 28, 1.3);
+    this.sprayAcc += dt * speed * (4 + cut * 8 + scraping * 53 + powder * 73);
+    const direction = Math.sign(skid || edge);
+    const fx = this.game.fx;
+    // 滑痕沿实际速度留下，刮起的雪从受力板刃向外侧甩。
+    for (let n = 0; this.sprayAcc >= 1 && n < 7; n++) {
+      this.sprayAcc--;
+      const soft = powder > Math.random();
+      const out = -direction * (1 + Math.random() * 4) * (scraping + powder * 0.75 + cut * 0.1);
+      const offset = -direction * (0.12 + Math.random() * broad * 0.5) + (Math.random() - 0.5) * 0.45;
+      const x = this.pos.x + this.right.x * offset - _f.x * (soft ? 0.18 : 0.57);
+      const z = this.pos.z + this.right.z * offset - _f.z * (soft ? 0.18 : 0.57);
+      const vx = this.vel.x * 0.18 + this.right.x * out + Math.random() - 0.5;
+      const vz = this.vel.z * 0.18 + this.right.z * out + Math.random() - 0.5;
+      const y = _v.y + 0.14;
+      if (soft) fx.powder(x, y, z, vx, 1.4 + Math.random() * 2.1, vz, 0.09 + Math.random() * 0.13);
+      else fx.spray(x, y, z, vx, 0.52 + Math.random() * (0.8 + scraping), vz, 0.035 + scraping * 0.058);
+    }
+    this.sprayAcc = Math.min(this.sprayAcc, 3);
   }
 
   // ---------- 机器人 ----------
@@ -1307,6 +1371,7 @@ export class Racer {
   dispose() {
     this.skier.dispose();
     this.trail.dispose();
+    this.scrapeTrail?.dispose();
     if (this.label) this.label.material.dispose();
   }
 }

@@ -633,6 +633,7 @@ export class Skier {
     const knee = this.form === 'ski' ? gb * 0.75 : 0;
     this.legs[0].rotation.x = this.legBase + Math.sin(t * 15) * kick + knee;
     this.legs[1].rotation.x = this.legBase - Math.sin(t * 15) * kick + knee;
+    if (s.ride) this.poseRide(s.ride, fl);
 
     // 加特林：枪口放平朝前，开火时枪管飞转、枪身抖动
     if (this.propGatling.visible) {
@@ -655,6 +656,47 @@ export class Skier {
       this.iceMat.emissiveIntensity = crack && Math.sin(t * 34) > 0 ? 1.1 : 0.5 + 0.2 * Math.sin(t * 7);
     } else {
       this.iceT = 0;
+    }
+  }
+
+  poseRide({ board, edge, skid, powder }, flail) {
+    const pressure = Math.abs(edge);
+    const slide = Math.abs(skid);
+    this.inner.rotation.z += this.pose.lean * 0.42 * (1 - flail);
+    this.inner.rotation.z -= edge * (board ? 0.52 : 0.32) + skid * 0.13;
+    this.inner.rotation.y = -skid * (board ? 0.60 : 0.51);
+    this.torso.position.y = 0.7 - pressure * 0.055 - slide * 0.10 - powder * 0.035;
+    if (board) {
+      // 左脚在前，脚尖朝横向。趾刃屈膝朝板前侧压，跟刃向后坐。
+      const toes = Math.max(0, edge);
+      const heels = Math.max(0, -edge);
+      this.torso.rotation.y = -0.93 + edge * 0.16 + skid * 0.26;
+      this.torso.rotation.x += -toes * 0.24 + heels * 0.3;
+      this.head.rotation.y = 0.81 - edge * 0.13;
+      for (let i = 0; i < 2; i++) {
+        const front = i === 0;
+        const leg = this.legs[i];
+        leg.position.x = front ? -0.036 : 0.036;
+        leg.position.z = front ? -0.29 : 0.45;
+        leg.rotation.y = front ? -1.02 : -1.43;
+        leg.rotation.x += (front ? 0.15 : 0.24) * heels - toes * 0.08;
+        leg.rotation.z = -edge * (front ? 0.11 : 0.19);
+      }
+      this.arms[0].rotation.x += 0.30 + toes * 0.25;
+      this.arms[1].rotation.x -= 0.21 + heels * 0.23;
+    } else {
+      // 双板在外侧脚承重，内腿收一点，肩膀比雪板更平。
+      this.torso.rotation.z += edge * 0.23;
+      this.torso.position.x = edge * 0.045;
+      for (let i = 0; i < 2; i++) {
+        const side = i === 0 ? -1 : 1;
+        const inside = Math.max(0, edge * side);
+        this.legs[i].position.y = 0.72 + inside * 0.052;
+        this.legs[i].rotation.x += inside * 0.12;
+        this.skis[i].position.z = -inside * 0.067;
+        this.skis[i].rotation.z = -edge * 0.20;
+        this.arms[i].rotation.x += inside * 0.17;
+      }
     }
   }
 

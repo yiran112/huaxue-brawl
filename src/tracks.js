@@ -97,6 +97,15 @@ export const TRACKS = [
 
 export const TRACK_MAP = Object.fromEntries(TRACKS.map((t) => [t.id, t]));
 
+export const CEDAR_PRACTICE = {
+  ...TRACK_MAP.cedar,
+  practice: true,
+  branches: 0,
+  features: [],
+  pads: [],
+};
+export const PRACTICE_SECONDS = 30;
+
 // 计时赛奖牌线（秒）：[金, 银, 铜]。按长度估算，平均时速约 110 / 101 / 92 km/h
 export function medalTimes(length) {
   return [length / 30.5, length / 28, length / 25.5];

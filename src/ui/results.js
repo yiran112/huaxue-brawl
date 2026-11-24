@@ -81,6 +81,9 @@ export const resultsMethods = {
       rw.innerHTML = this.rewardHtml(data.reward);
     }
     rw.classList.toggle('hidden', !data.reward);
+    const swap = $('btnPracticeSwap');
+    swap.textContent = data.swapLabel || '';
+    swap.classList.toggle('hidden', !data.swapLabel);
     $('btnNext').textContent = data.nextLabel;
     $('btnLobby').textContent = data.backLabel || '返回大厅';
     $('results').classList.remove('hidden');

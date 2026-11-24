@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { THEMES, THEME_KEYS, LENGTHS, LOOK_PRESETS, BOT_NAMES, DEFAULT_RULES, POINTS, SKINS, MODES } from './config.js';
 import { GEAR, LOOK_EXTRA_DEFAULTS, COSMETIC_SLOTS, uniformUp, pickBotGear } from './gear.js';
-import { TRACK_MAP } from './tracks.js';
+import { CEDAR_PRACTICE, PRACTICE_SECONDS, TRACK_MAP } from './tracks.js';
 import { RANK_LV, RANK_MAP, scoreLeave, ESCAPE_EXTRA } from './rank.js';
 import { Profile, cleanNick, randomNick } from './profile.js';
 import { Account } from './account.js';
@@ -632,6 +632,13 @@ class Game {
     this.startRace(true);
   }
 
+  startPractice(gear) {
+    if ((gear !== 'ski' && gear !== 'learner') || this.seatBusy() || (this.netMode && this.customRoom)) return;
+    if (this.netMode) this.leavePublicQueue();
+    this.session = { kind: 'practice', mode: 'speed', track: 'cedar', gear };
+    this.startRace(this.trackDef !== CEDAR_PRACTICE);
+  }
+
   startRank(id) {
     if (this.state !== 'menu' || this.seatBusy()) return;
     if (!this.profile.rankOpen()) {
@@ -676,7 +683,7 @@ class Game {
     }
     const s = this.session;
     // 计时赛：同一条赛道接着刷成绩
-    if (s.mode === 'tt') {
+    if (s.mode === 'tt' || s.kind === 'practice') {
       this.startRace(false);
       return;
     }
@@ -697,6 +704,7 @@ class Game {
   makeRules(s) {
     const base = this.soloRules;
     const r = { ...base, banned: base.banned.slice(), mode: s.mode || 'race' };
+    if (s.kind === 'practice') Object.assign(r, { items: false, bots: 0, wildlife: false, rounds: 1 });
     const spec = s.kind === 'rank' ? RANK_MAP[s.rank] : null;
     if (spec) Object.assign(r, spec.rules, { rounds: 1, difficulty: 1, wildlife: true, banned: [], track: 'random', theme: 'random' });
     const m = r.mode;
@@ -715,7 +723,8 @@ class Game {
     const s = this.session;
     this.rules = this.makeRules(s);
     const trackId = s.track;
-    const def = trackId && trackId !== 'random' ? TRACK_MAP[trackId] || null : null;
+    const practice = s.kind === 'practice';
+    const def = practice ? CEDAR_PRACTICE : TRACK_MAP[trackId] || null;
     if (newCourse || def !== this.trackDef || (!def && this.course && this.course.def)) {
       newCourse = true;
       this.trackDef = def;
@@ -723,13 +732,14 @@ class Game {
       this.themeKey = this.resolveTheme();
     }
     const botUp = uniformUp([0, 1, 2][this.rules.difficulty] ?? 1);
+    const practiceLook = practice && { ...this.look, gear: s.gear, ski: s.gear === 'ski' ? 0x297da8 : 0xc44a31, trail: 0 };
     const roster = [];
     for (let i = 0; i < 1 + this.rules.bots; i++) {
       roster.push({
         name: i === 0 ? '你' : this.botNames[i - 1],
-        look: i === 0 ? this.look : this.botLooks[(i - 1) % 7],
+        look: practiceLook || (i === 0 ? this.look : this.botLooks[(i - 1) % 7]),
         bot: i > 0,
-        up: i === 0 ? this.profile.up(this.look.gear) : botUp,
+        up: practice ? null : i === 0 ? this.profile.up(this.look.gear) : botUp,
       });
     }
     this.beginRace(newCourse, roster, 0);
@@ -828,10 +838,10 @@ class Game {
       this.racers.push(r);
     }
     this.player = this.racers[me];
-    this.replay.begin(this.racers);
+    if (!this.course.def?.practice) this.replay.begin(this.racers);
     this.itemRespawn = this.mode.itemRespawn;
     this.items = this.rules.items ? new Items(this) : NO_ITEMS;
-    this.hazards = new Hazards(this);
+    this.hazards = this.course.def?.practice ? NO_HAZARDS : new Hazards(this);
     this.rep = this.newReport();
     this.rewarded = false;
     this.mateLeft = false;
@@ -2292,11 +2302,11 @@ class Game {
       this.ui.setCount('冲！');
       this.goT = 0.9;
       this.sfx.beep(true);
-      this.sfx.musicStart(); // 喊“冲！”的同时音乐响起
+      if (!this.course.def?.practice) this.sfx.musicStart();
       for (const r of this.racers) {
         if (!r.owned) continue; // 别人的角色等他自己出发
         r.state = 'ski';
-        r.vel.set(0, 0, -5 - Math.random() * 2);
+        r.vel.set(0, 0, this.course.def?.practice ? -6 : -5 - Math.random() * 2);
         if (r.isBot && Math.random() < BOT_START[this.rules.difficulty]) r.startBoost(Math.random() < 0.5);
       }
       const p = this.player;
@@ -2356,6 +2366,8 @@ class Game {
   }
 
   updateRace(dt) {
+    const practice = this.course.def?.practice;
+    if (practice && this.state === 'results') return;
     if (this.goT > 0) {
       this.goT -= dt;
       if (this.goT <= 0) this.ui.setCount('');
@@ -2399,6 +2411,20 @@ class Game {
       this.items.update(h);
       this.hazards.update(h, this.raceTime);
       this.mode.update(h);
+      if (practice && this.raceTime >= PRACTICE_SECONDS - 1e-6) {
+        this.raceTime = PRACTICE_SECONDS;
+        this.state = 'results';
+        this.sfx.silenceRide();
+        this.ui.showHud(false);
+        this.ui.showResults({
+          title: '试滑结束',
+          sub: `雪松村 · ${GEAR[this.session.gear].form === 'ski' ? '双板' : '单板'} · ${PRACTICE_SECONDS} 秒`,
+          rows: [],
+          nextLabel: '再滑一次',
+          swapLabel: this.session.gear === 'ski' ? '换单板再滑' : '换双板再滑',
+        });
+        return;
+      }
       // 冲线（联机时只判定本机负责的选手，别人冲线会发消息过来）
       const L = this.course.L;
       for (const r of this.racers) {
@@ -2434,7 +2460,7 @@ class Game {
       }
     }
     const p = this.player;
-    if (this.state === 'race') this.sfx.setRide(p.speed, p.grounded && p.state === 'ski', clamp(p.slip / 12, 0, 1));
+    if (this.state === 'race') this.sfx.setRide(p.speed, p.grounded && p.state === 'ski', clamp(p.slip / 12, 0, 1), p.ride);
     else this.sfx.silenceRide();
     this.updateCamera(dt, false);
   }
@@ -2513,8 +2539,8 @@ class Game {
       let wantYaw = p.yaw;
       if (p.state === 'tumble' && p.speed > 3) wantYaw = Math.atan2(-p.vel.x, -p.vel.z);
       this.camYaw += wrapAngle(wantYaw - this.camYaw) * damp(p.state === 'tumble' ? 2 : 5.5, dt);
-      const back = 4.9;
-      const up = 2.3;
+      const back = p.ride ? 4.6 : 4.9;
+      const up = p.ride ? 2.75 : 2.3;
       _v.set(p.pos.x + Math.sin(this.camYaw) * back, p.pos.y + up, p.pos.z + Math.cos(this.camYaw) * back);
       _v.y = Math.max(_v.y, course.height(_v.x, _v.z) + 1.5);
       if (snap) cam.position.lerp(_v, damp(3, dt));
@@ -2531,6 +2557,7 @@ class Game {
       _v2.y = lerp(_v2.y, gh, 0.6);
       cam.lookAt(_v2);
       targetFov = 60 + Math.min(p.speed, 62) * 0.42 + (p.boostT > 0 || p.nitroT > 0 ? 8 : 0);
+      if (p.ride) targetFov = 57 + Math.min(p.speed, 52) * 0.28;
     }
     const sh = this.fx.shake;
     if (sh > 0.01) {

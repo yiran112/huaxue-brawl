@@ -1,7 +1,7 @@
 // DOM 界面：大厅菜单。匹配、积分榜、商城、比赛 HUD、结算分在 ui/ 下，方法都挂在这个 UI 上
 import { THEMES, THEME_KEYS, LENGTHS, WEAPONS, WEAPON_KEYS, SKINS, SUIT_COLORS, HATS, POINTS, MODES, MODE_KEYS } from './config.js';
 import { GEAR, GEAR_KEYS, RARITY, RARITY_KEYS, STAT_NAMES, STAT_KEYS, STAT_MAX, UPGRADES, UP_KEYS, UP_MAX, HAT_UNLOCK, COSMETIC_SLOTS, BOX_COST, gearStats, unlockOf } from './gear.js';
-import { TRACKS, TRACK_MAP, CUPS, CUP_MAP, medalTimes } from './tracks.js';
+import { TRACKS, TRACK_MAP, CUPS, CUP_MAP, PRACTICE_SECONDS, medalTimes } from './tracks.js';
 import { ACH_MAP, CUP_LV, seasonNow, rankSeasonNow, seasonLeftText } from './profile.js';
 import { RANK_LV, RANK_MODES, RANK_MAP, TIERS, tierAt } from './rank.js';
 import { fmtTime } from './util.js';
@@ -156,6 +156,7 @@ export class UI {
     });
     $('btnLobby').addEventListener('click', () => game.toMenu());
     $('btnNext').addEventListener('click', () => game.nextRace());
+    $('btnPracticeSwap').addEventListener('click', () => game.startPractice(game.session.gear === 'ski' ? 'learner' : 'ski'));
     $('btnResume').addEventListener('click', () => game.setPaused(false));
     $('btnRestart').addEventListener('click', () => game.restartRace());
     $('btnQuit').addEventListener('click', () => game.quitRace());
@@ -588,7 +589,11 @@ export class UI {
     const best = P.data.best[def.id];
     const [au, ag, cu] = medalTimes(def.length);
     return `<div class="rsel"><span class="ttag c${k + 1}">${CUPS[k].name}</span><b>${esc(def.name)}</b><small>${THEMES[def.theme].name} · ${(def.length / 1000).toFixed(1)} km · ${esc(def.desc)}</small></div>
-      <div class="rmed"><label>计时赛奖牌线</label><span>🥇 ${fmtTime(au)}</span><span>🥈 ${fmtTime(ag)}</span><span>🥉 ${fmtTime(cu)}</span>${best ? `<em>最好 ${fmtTime(best)} ${MEDAL[P.data.medals[def.id] || 0]}</em>` : ''}</div>`;
+      <div class="rmed"><label>计时赛奖牌线</label><span>🥇 ${fmtTime(au)}</span><span>🥈 ${fmtTime(ag)}</span><span>🥉 ${fmtTime(cu)}</span>${best ? `<em>最好 ${fmtTime(best)} ${MEDAL[P.data.medals[def.id] || 0]}</em>` : ''}</div>
+      ${def.id === 'cedar' && !this.fromRoom ? `<div class="rchips rpractice"><label>${PRACTICE_SECONDS} 秒试滑</label>
+        <button class="on" data-act="practice" data-id="ski">🎿 双板试滑</button>
+        <button class="on" data-act="practice" data-id="learner">🏂 单板试滑</button>
+      </div>` : ''}`;
   }
 
   trackCardHtml(t) {
@@ -1040,6 +1045,7 @@ export class UI {
     }
     if (act === 'rankGo') return g.startRank(b.dataset.id || this.rankMode);
     if (act === 'quick') return g.startTournament();
+    if (act === 'practice') return g.startPractice(b.dataset.id);
     if (act === 'match') return g.startMatch();
     if (act === 'hall') return g.openHall();
     if (act === 'mkroom') return g.createListedRoom();

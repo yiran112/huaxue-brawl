@@ -86,6 +86,13 @@ export class Sfx {
     this.carveGain.gain.value = 0;
     src2.connect(this.carveFilter).connect(this.carveGain).connect(this.master);
     src2.start();
+    this.snowFilter = ctx.createBiquadFilter();
+    this.snowFilter.type = 'bandpass';
+    this.snowFilter.frequency.value = 850;
+    this.snowFilter.Q.value = 0.75;
+    this.snowGain = ctx.createGain();
+    this.snowGain.gain.value = 0;
+    src2.connect(this.snowFilter).connect(this.snowGain).connect(this.master);
   }
 
   // 每帧调用：只要画面还在刷新，声音就该是开着的
@@ -100,12 +107,30 @@ export class Sfx {
     if (this.master) this.master.gain.value = m ? 0 : this.vol;
   }
 
-  setRide(speed, grounded, carve) {
+  setRide(speed, grounded, carve, ride = null) {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     const s = Math.min(1, speed / 55);
-    this.windGain.gain.setTargetAtTime(0.03 + s * 0.3, t, 0.1);
+    this.windGain.gain.setTargetAtTime(ride ? 0.023 + s * 0.16 : 0.03 + s * 0.3, t, 0.1);
     this.windFilter.frequency.setTargetAtTime(350 + s * 1300, t, 0.1);
+    if (ride) {
+      const { board, edge, skid, powder } = ride;
+      const slide = Math.abs(skid);
+      const pressure = Math.abs(edge);
+      const contact = grounded ? Math.min(speed / 11, 1) : 0;
+      // 板刃的高频随换刃起落，横刮和粉雪各自压到更宽、更低的频段。
+      const edgeHz = board ? 2200 + edge * 850 : 3400;
+      this.carveFilter.frequency.setTargetAtTime(edgeHz, t, 0.055);
+      this.carveGain.gain.setTargetAtTime(contact * (1 - powder * 0.92) * (1 - slide * 0.62) *
+        (0.014 + s * 0.034 + pressure * (board ? 0.13 : 0.105)), t, 0.055);
+      const snowHz = (950 + slide * 870) * (1 - powder) + (380 + s * 290) * powder;
+      this.snowFilter.frequency.setTargetAtTime(snowHz, t, 0.075);
+      this.snowGain.gain.setTargetAtTime(contact *
+        (slide * (0.13 + s * 0.27) * (1 - powder * 0.55) + powder * (0.12 + s * 0.39)), t, 0.06);
+      return;
+    }
+    this.carveFilter.frequency.setTargetAtTime(2600, t, 0.065);
+    this.snowGain.gain.setTargetAtTime(0, t, 0.08);
     this.carveGain.gain.setTargetAtTime(grounded ? 0.015 + s * 0.05 + carve * 0.14 : 0, t, 0.05);
   }
 
@@ -114,6 +139,7 @@ export class Sfx {
     const t = this.ctx.currentTime;
     this.windGain.gain.setTargetAtTime(0.02, t, 0.2);
     this.carveGain.gain.setTargetAtTime(0, t, 0.1);
+    this.snowGain.gain.setTargetAtTime(0, t, 0.1);
   }
 
   noise(dur, freq, type, vol, freqEnd) {

@@ -1,6 +1,7 @@
 // 比赛中的 HUD：名次、计时、道具、技巧链、播报、暂停菜单
 import { THEMES, WEAPONS, MODES } from '../config.js';
 import { RANK_MAP } from '../rank.js';
+import { PRACTICE_SECONDS } from '../tracks.js';
 import { TEAM_COLORS } from '../modes.js';
 import { CHAIN_T, MULT_MAX } from '../chain.js';
 import { fmtTime } from '../util.js';
@@ -38,6 +39,7 @@ export const hudMethods = {
       return `${m ? `${m.icon} ${m.name}` : '联机'} · ${where}`;
     }
     const s = g.session;
+    if (s.kind === 'practice') return `雪松村 · ${s.gear === 'ski' ? '双板' : '单板'}`;
     const where = g.trackDef ? g.trackDef.name : THEMES[g.themeKey].name;
     const m = MODES[g.mode.key];
     return `${m.icon} ${m.name} · ${where}${g.rules.rounds > 1 ? ` · 第 ${g.round} / ${g.rules.rounds} 轮` : ''}`;
@@ -45,6 +47,7 @@ export const hudMethods = {
 
   resetHud() {
     const g = this.game;
+    $('hud').classList.toggle('practice', g.session.kind === 'practice');
     $('feed').innerHTML = '';
     this.feedItems = [];
     $('banner').className = 'stroke';
@@ -228,6 +231,11 @@ export const hudMethods = {
     const p = g.player;
     this.setFrost(!!p && p.frozenT > 0);
     if (!p) return;
+    if (g.session.kind === 'practice') {
+      $('timer').textContent = fmtTime(Math.max(0, PRACTICE_SECONDS - g.raceTime));
+      $('speedNum').textContent = Math.round(p.vel.length() * 3.6);
+      return;
+    }
     this.updateChain(p);
     $('posNum').textContent = p.out ? '💀' : p.rank;
     $('timer').textContent = fmtTime(p.finished ? p.finishTime : g.raceTime);

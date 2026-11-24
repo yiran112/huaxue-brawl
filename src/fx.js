@@ -73,6 +73,68 @@ class Pool {
   }
 }
 
+class PowderCloud {
+  constructor(scene) {
+    this.list = [];
+    this.capacity = 96;
+    const geo = new THREE.BufferGeometry();
+    this.pos = new THREE.BufferAttribute(new Float32Array(this.capacity * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    this.puff = new THREE.BufferAttribute(new Float32Array(this.capacity * 2), 2).setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('position', this.pos);
+    geo.setAttribute('puff', this.puff);
+    geo.setDrawRange(0, 0);
+    const material = new THREE.PointsMaterial({ color: 0xecf5ff, transparent: true, depthWrite: false });
+    material.onBeforeCompile = (shader) => {
+      shader.vertexShader = 'attribute vec2 puff; varying float vPuffAlpha;\n' +
+        shader.vertexShader.replace('gl_PointSize = size;', 'gl_PointSize = puff.x; vPuffAlpha = puff.y;');
+      shader.fragmentShader = 'varying float vPuffAlpha;\n' +
+        shader.fragmentShader.replace('#include <color_fragment>', `
+          #include <color_fragment>
+          float radius = length(gl_PointCoord - vec2(0.5));
+          diffuseColor.a *= vPuffAlpha * (1.0 - smoothstep(0.07, 0.48, radius));
+        `);
+    };
+    this.points = new THREE.Points(geo, material);
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+  }
+
+  spawn(x, y, z, vx, vy, vz, size) {
+    if (this.list.length < this.capacity) this.list.push({ x, y, z, vx, vy, vz, size, life: 0.54 + Math.random() * 0.34, age: 0 });
+  }
+
+  update(dt) {
+    const list = this.list;
+    const slow = Math.exp(-2.8 * dt);
+    for (let i = list.length - 1; i >= 0; i--) {
+      const p = list[i];
+      p.age += dt;
+      if (p.age >= p.life) {
+        list[i] = list[list.length - 1];
+        list.pop();
+        continue;
+      }
+      p.vx *= slow;
+      p.vy = (p.vy - 0.8 * dt) * slow;
+      p.vz *= slow;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+    }
+    const geo = this.points.geometry;
+    geo.setDrawRange(0, list.length);
+    if (!list.length) return;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      const fade = 1 - p.age / p.life;
+      this.pos.setXYZ(i, p.x, p.y, p.z);
+      this.puff.setXY(i, p.size * (2.1 + (1 - fade) * 4.7), Math.min(1, p.age * 32) * fade * 0.43);
+    }
+    this.pos.needsUpdate = true;
+    this.puff.needsUpdate = true;
+  }
+}
+
 const COL = {
   fire0: C(0xfff3a8), fire1: C(0xff7a14), fire2: C(0xc8300a),
   spark: C(0xffe066), smoke0: C(0x2b2b31), smoke1: C(0x5d5d66),
@@ -147,6 +209,11 @@ export class FX {
   // 滑行溅雪
   spray(x, y, z, vx, vy, vz, size = 0.1) {
     this.lit.spawn(x, y, z, vx, vy, vz, 0.35 + Math.random() * 0.3, size, size * 2.2, COL.snow, COL.snow2, 9, 2.5);
+  }
+
+  powder(x, y, z, vx, vy, vz, size) {
+    this.powderCloud ??= new PowderCloud(this.scene);
+    this.powderCloud.spawn(x, y, z, vx, vy, vz, size);
   }
 
   smokeTrail(pos, size = 0.22) {
@@ -309,6 +376,7 @@ export class FX {
   update(dt) {
     this.lit.update(dt);
     this.glow.update(dt);
+    this.powderCloud?.update(dt);
     for (let i = this.domes.length - 1; i >= 0; i--) {
       const d = this.domes[i];
       d.life -= dt;
@@ -375,6 +443,10 @@ export class FX {
   clear() {
     this.lit.list.length = 0;
     this.glow.list.length = 0;
+    if (this.powderCloud) {
+      this.powderCloud.list.length = 0;
+      this.powderCloud.update(0);
+    }
     for (const arr of [this.domes, this.rings, this.beams]) {
       for (const d of arr) {
         this.scene.remove(d.m);
@@ -389,13 +461,24 @@ export class FX {
 }
 
 // 雪面滑痕
-let trailTex = null;
-function getTrailTex() {
-  if (trailTex) return trailTex;
+const trailTextures = {};
+function getTrailTex(style) {
+  if (trailTextures[style]) return trailTextures[style];
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 4;
   const g = c.getContext('2d');
+  if (style !== 'skis') {
+    const band = g.createLinearGradient(0, 0, 64, 0);
+    band.addColorStop(0, 'rgba(255,255,255,0)');
+    band.addColorStop(style === 'board' ? 0.36 : 0.17, 'rgba(255,255,255,0.28)');
+    band.addColorStop(0.5, '#fff');
+    band.addColorStop(style === 'board' ? 0.64 : 0.83, 'rgba(255,255,255,0.28)');
+    band.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = band;
+    g.fillRect(0, 0, 64, 4);
+    return (trailTextures[style] = new THREE.CanvasTexture(c));
+  }
   g.clearRect(0, 0, 64, 4);
   g.fillStyle = 'rgba(255,255,255,1)';
   g.fillRect(8, 0, 13, 4);
@@ -405,12 +488,11 @@ function getTrailTex() {
   g.fillRect(21, 0, 4, 4);
   g.fillRect(39, 0, 4, 4);
   g.fillRect(56, 0, 4, 4);
-  trailTex = new THREE.CanvasTexture(c);
-  return trailTex;
+  return (trailTextures[style] = new THREE.CanvasTexture(c));
 }
 
 export class Trail {
-  constructor(scene, color = 0x6f8fd0, N = 170) {
+  constructor(scene, color = 0x6f8fd0, N = 170, style = 'skis') {
     this.N = N;
     this.count = 0;
     this.pos = new Float32Array(N * 2 * 3);
@@ -440,7 +522,7 @@ export class Trail {
     this.r = c.r; this.g = c.g; this.b = c.b;
     this.mesh = new THREE.Mesh(
       geo,
-      new THREE.MeshBasicMaterial({ map: getTrailTex(), vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+      new THREE.MeshBasicMaterial({ map: getTrailTex(style), vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
     );
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 1;
@@ -468,7 +550,7 @@ export class Trail {
   }
 
   // 每帧调用；grounded 为 false 时断开
-  add(pos, right, normal, grounded, width = 0.34) {
+  add(pos, right, normal, grounded, width = 0.34, strength = 1) {
     if (!grounded) {
       this.broken = true;
       return;
@@ -485,7 +567,7 @@ export class Trail {
       this.push(x, y, z, sx, sy, sz, 0);
       this.broken = false;
     } else {
-      this.push(x, y, z, sx, sy, sz, 1);
+      this.push(x, y, z, sx, sy, sz, strength);
     }
     this.px = x; this.py = y; this.pz = z; this.sx = sx; this.sy = sy; this.sz = sz;
     this.lastX = pos.x;
