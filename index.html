@@ -123,41 +123,77 @@
   @keyframes alPulse { from { transform: scale(.9); } to { transform: scale(1.1); } }
 
   /* ---------- 手机触屏 ---------- */
-  #touch { position: fixed; inset: 0; pointer-events: none; display: none; --s: min(24vh, 128px); --m: calc(var(--s) * .78); }
+  /* 按键的位置和大小由 src/ui/touchKit.js 算好写进行内样式（--d 是按键直径），这里只管长相。
+     每个键用 --c 定描边色、--cf 定按下去的颜色。道具键直接显示手里的道具，氮气键带充能圈，所以触屏时不再单独显示道具栏和氮气条 */
+  #touch { position: fixed; inset: 0; pointer-events: none; display: none; }
   body.touch #hud:not(.hidden) + #touch { display: block; }
-  body.touch #hint, body.touch #itemKey { display: none; }
-  #touch .tb { position: absolute; pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; padding: 0;
-    width: var(--m); height: var(--m); border-radius: 50%; border: 3px solid rgba(255, 255, 255, .55); background: rgba(11, 21, 48, .42);
-    font-size: calc(var(--m) * .26); font-weight: 900; display: flex; align-items: center; justify-content: center; }
-  #touch .tb.on { background: rgba(255, 210, 60, .5); border-color: #ffd23c; }
-  #touch .tl, #touch .tr, #touch .b1 { width: var(--s); height: var(--s); font-size: calc(var(--s) * .3); bottom: 5vh; }
-  #touch .tl { left: 3vw; }
-  #touch .tr { left: calc(3vw + var(--s) + 2vw); }
-  #touch .b1 { right: 3vw; }
-  #touch .b2 { right: calc(3vw + var(--s) + 2vw); bottom: 5vh; }
-  #touch .b3 { right: 3vw; bottom: calc(5vh + var(--s) + 3vh); }
-  #touch .b4 { right: calc(3vw + var(--s) + 2vw); bottom: calc(5vh + var(--m) + 3vh); }
-  #touch .b5 { right: calc(3vw + var(--s) + var(--m) + 4vw); bottom: 5vh; }
-  #touch .s1, #touch .s2 { top: 2vh; width: 44px; height: 44px; font-size: 18px; border-width: 2px; }
-  #touch .s1 { right: calc(2vw + 52px); }
-  #touch .s2 { right: 2vw; }
-  #touch .s3 { right: calc(2vw + 104px); }
-  #touch .s3, #touch .em { top: 2vh; width: 44px; height: 44px; font-size: 22px; border-width: 2px; }
-  #touch .em { display: none; }
-  #touch.emoOpen .em { display: flex; }
-  #touch .em0 { right: calc(2vw + 156px); }
-  #touch .em1 { right: calc(2vw + 208px); }
-  #touch .em2 { right: calc(2vw + 260px); }
-  #touch .em3 { right: calc(2vw + 312px); }
-  /* 触屏时右下角让给按键：速度和氮气挪到道具栏两边，技巧链抬到转向键上面 */
-  body.touch #side { top: 96px; }
-  body.touch #rank .row { padding-top: 1px; padding-bottom: 1px; margin-bottom: 2px; }
-  body.touch #speed { right: calc(50% + 70px); bottom: 14px; }
-  body.touch #nitro { right: calc(50% + 70px); bottom: 98px; }
+  body.touch :is(#hint, #itemKey, #item, #nitro) { display: none; }
+  #touch .tb { --c: rgba(255, 255, 255, .5); --cf: rgba(255, 255, 255, .28); --d: 64px;
+    position: absolute; pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none;
+    padding: 0; border-radius: 50%; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 30%, rgba(46, 66, 128, .6), rgba(11, 21, 48, .6) 72%);
+    box-shadow: inset 0 0 0 2.5px var(--c), 0 4px 14px rgba(4, 8, 24, .3); transition: transform .07s ease-out; }
+  #touch .tb.on { transform: scale(.9); background: radial-gradient(circle at 50% 30%, var(--cf), rgba(11, 21, 48, .55) 85%); }
+  #touch .tb .ic { width: calc(var(--d) * .44); height: calc(var(--d) * .44); flex: none; overflow: visible; filter: drop-shadow(0 1.5px 0 rgba(11, 21, 48, .6)); }
+  #touch .tb .lb { margin-top: calc(var(--d) * .02); max-width: 92%; overflow: hidden; white-space: nowrap; text-overflow: clip;
+    font-size: clamp(9px, calc(var(--d) * .15), 13px); font-weight: 900; letter-spacing: 1px; line-height: 1; text-shadow: 0 1px 0 rgba(11, 21, 48, .7); }
+  #touch .badge { position: absolute; right: -4px; top: -4px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; font-size: 13px;
+    font-weight: 900; line-height: 22px; text-align: center; background: #ff3d6e; box-shadow: 0 0 0 2px #0b1530; }
+  /* 左手转向：一条胶囊从中间分开 */
+  #touch :is(.k-left, .k-right) { --c: rgba(255, 255, 255, .45); --cf: rgba(255, 255, 255, .34); }
+  #touch .k-left { border-radius: calc(var(--d) / 2) 12px 12px calc(var(--d) / 2); }
+  #touch .k-right { border-radius: 12px calc(var(--d) / 2) calc(var(--d) / 2) 12px; }
+  #touch :is(.k-left, .k-right) .ic { width: calc(var(--d) * .4); height: calc(var(--d) * .4); }
+  #touch .k-left .ic { margin-left: 10%; } #touch .k-right .ic { margin-right: 10%; }
+  /* 右手：跳是主键，金色实心 */
+  #touch .k-jump { color: #3a2400; background: radial-gradient(circle at 50% 28%, rgba(255, 232, 140, .95), rgba(255, 178, 31, .92) 74%);
+    box-shadow: inset 0 0 0 2.5px rgba(255, 255, 255, .7), inset 0 -5px 0 rgba(170, 95, 0, .3), 0 4px 16px rgba(255, 170, 30, .32); }
+  #touch .k-jump.on { background: radial-gradient(circle at 50% 28%, #fff1b8, #ffc23c 74%); }
+  #touch .k-jump .ic { filter: none; }
+  #touch .k-jump .lb { text-shadow: none; }
+  #touch .k-drift { --c: rgba(255, 158, 64, .95); --cf: rgba(255, 140, 40, .7); }
+  #touch .k-brake { --c: rgba(255, 96, 112, .95); --cf: rgba(255, 70, 90, .7); }
+  #touch .k-fire { --c: rgba(176, 128, 255, .95); --cf: rgba(150, 100, 255, .7); }
+  #touch .k-fire .wp { display: none; align-items: center; height: calc(var(--d) * .46); font-size: calc(var(--d) * .4); line-height: 1; }
+  #touch .k-fire.has { --c: #ffd23c; background: radial-gradient(circle at 50% 30%, rgba(120, 84, 220, .82), rgba(46, 26, 104, .82) 74%);
+    box-shadow: inset 0 0 0 3px var(--c), 0 0 18px rgba(255, 210, 60, .5), 0 4px 14px rgba(4, 8, 24, .3); }
+  #touch .k-fire.has .wp { display: flex; }
+  #touch .k-fire.has .ic { display: none; }
+  #touch .k-fire.has .lb { color: #ffd23c; letter-spacing: 0; }
+  #touch .k-fire.pop { animation: tbPop .32s ease-out; }
+  @keyframes tbPop { 0% { transform: scale(1.35); } 60% { transform: scale(.94); } }
+  /* 氮气：没存着就暗着，充能圈走到头存一瓶；喷的时候闪 */
+  #touch .k-nitro { --c: transparent; --cf: rgba(63, 168, 255, .7); }
+  #touch .k-nitro .ic, #touch .k-nitro .lb { opacity: .45; transition: opacity .15s; }
+  #touch .k-nitro.ready .ic, #touch .k-nitro.ready .lb { opacity: 1; }
+  #touch .k-nitro.ready { background: radial-gradient(circle at 50% 30%, rgba(63, 150, 255, .78), rgba(16, 44, 120, .72) 74%);
+    box-shadow: 0 0 16px rgba(63, 168, 255, .6), 0 4px 14px rgba(4, 8, 24, .3); }
+  #touch .k-nitro.burn { animation: blink .12s infinite alternate; }
+  #touch .ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
+  #touch .ring circle { fill: none; stroke: rgba(255, 255, 255, .22); stroke-width: 6; }
+  #touch .ring .rf { stroke: #7fe0ff; stroke-dasharray: 0 100; stroke-linecap: round; transition: stroke-dasharray .12s; }
+  #touch .k-nitro .badge { background: #2f7dff; }
+  /* 右上角：暂停、复位、表情 */
+  #touch .sys { --c: rgba(255, 255, 255, .42); --cf: rgba(255, 210, 60, .55); }
+  #touch .sys .ic { width: calc(var(--d) * .5); height: calc(var(--d) * .5); }
+  #touch .em { display: none; font-size: calc(var(--d) * .54); line-height: 1; --c: rgba(255, 210, 60, .7); }
+  #touch.emoOpen .em { display: flex; animation: emIn .16s ease-out; }
+  #touch.emoOpen .k-emo { --c: #ffd23c; background: rgba(255, 210, 60, .35); }
+  @keyframes emIn { from { transform: translateX(12px) scale(.6); opacity: 0; } }
+  #touch .off { display: none !important; }
+  /* 触屏时 HUD 让开按键：速度表在转向键右边，名次表在右上角按键下面，技巧链抬到转向键上面。
+     --spdL 这些是 touch.js 按实际按键位置写的屏幕像素，除以 --hz 抵掉 HUD 的整体缩放 */
+  #hud { --hz: 1; }
+  body.touch #side { top: calc(var(--sideT, 64px) / var(--hz)); right: calc(var(--sideR, 14px) / var(--hz)); width: 200px; }
+  body.touch #rank { font-size: 17px; }
+  body.touch #rank .row { padding-top: 2px; padding-bottom: 2px; margin-bottom: 3px; }
+  body.touch #rank .row.gap { margin-top: 10px; }
+  body.touch #speed { left: calc(var(--spdL, 260px) / var(--hz)); right: auto; bottom: calc(var(--spdB, 16px) / var(--hz)); text-align: left; line-height: 1; }
   body.touch #chain, body.touch #trickPop { bottom: 40%; left: 3%; }
   body.touch #progress { bottom: 44%; }
+  body.touch #tip { bottom: 34%; }
   /* 小屏（手机横屏）：比赛 HUD 整体缩小 */
-  @media (max-height: 560px), (max-width: 760px) { #hud { zoom: .62; } }
+  @media (max-height: 560px), (max-width: 760px) { #hud { zoom: .62; --hz: .62; } }
   /* ---------- 精彩回放 ---------- */
   body.replaying #results, body.replaying #hud, body.replaying #touch { display: none !important; }
   #replayBar { position: fixed; inset: 0; z-index: 30; pointer-events: none; }
@@ -166,6 +202,7 @@
   #replayBar::after { bottom: 0; }
   #replayTag { position: absolute; left: 28px; top: calc(9vh + 14px); font-size: 28px; font-weight: 900; font-style: italic; letter-spacing: 4px; color: #ff5a6a; }
   #btnSkip { position: absolute; right: 24px; top: calc(9vh + 12px); pointer-events: auto; }
+  #skipDeparture { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); z-index: 8; min-width: 86px; min-height: 42px; }
 
   /* ---------- 面板通用 ---------- */
   .overlay { position: fixed; inset: 0; display: flex; }
@@ -1198,6 +1235,7 @@
 </div>
 
 <div id="replayBar" class="hidden"><span id="replayTag" class="stroke">回放</span><button class="btn" id="btnSkip">跳过</button></div>
+<button class="btn sm hidden" id="skipDeparture">跳过</button>
 
 <div id="pause" class="overlay hidden">
   <div id="pauseBox" class="panel">

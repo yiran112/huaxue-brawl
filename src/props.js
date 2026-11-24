@@ -82,7 +82,7 @@ export function buildArch(text = 'FINISH', color = '#e0263c', R = 10) {
   return g;
 }
 
-export function buildChairlift() {
+export function buildChairlift(withCable = true) {
   const g = new THREE.Group();
   const metal = 0x9aa3ad;
   const W = 9.4;
@@ -98,9 +98,11 @@ export function buildChairlift() {
   g.add(mesh('box', metal, 2.6, 0.12, 0.12, 0, 3.3, 0.1));
   g.add(limb(metal, 0, 3.3, 0.1, 0, 6.6, 0.1, 0.07));
   g.add(mesh('box', 0x59616b, 0.5, 0.3, 1.2, 0, 6.7, 0.1));
-  const cable = mesh('cyl', 0x3a3f47, 0.035, 400, 0.035, 0, 6.9, 0.1);
-  cable.rotation.x = Math.PI / 2 - 0.22;
-  g.add(cable);
+  if (withCable) {
+    const cable = mesh('cyl', 0x3a3f47, 0.035, 400, 0.035, 0, 6.9, 0.1);
+    cable.rotation.x = Math.PI / 2 - 0.22;
+    g.add(cable);
+  }
   g.add(mesh('box', 0x59616b, W, 0.05, 0.25, 0, 0.12, -0.5)); // 脚踏
   return g;
 }

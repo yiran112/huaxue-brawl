@@ -34,7 +34,7 @@ function getStage() {
 }
 
 // 镜头对准这堆零件，上下左右正好框住，四周留一点边
-function frame(camera, root) {
+export function frameGearPreview(camera, root) {
   const box = new THREE.Box3().setFromObject(root);
   if (box.isEmpty()) return false;
   const c = box.getCenter(new THREE.Vector3());
@@ -75,14 +75,12 @@ function toBlobUrl(dataUrl) {
   return URL.createObjectURL(new Blob([buf], { type: 'image/png' }));
 }
 
-function shoot(id, look) {
-  const st = getStage();
-  if (!st) return null;
+export function makeGearPreview(id, look) {
   // 拼一个完整的角色，只把脚下的装备（两块雪板，或者整台载具）摘出来拍
   const skier = new Skier({ ...look, gear: id });
   skier.group.updateMatrixWorld(true);
   const root = new THREE.Group();
-  st.scene.add(root);
+  root.updateMatrixWorld(true);
   for (const part of [...skier.skis, skier.vehicle]) if (part) root.attach(part);
   // 加速才亮的尾焰、照在雪面上的光晕不拍
   const drop = [];
@@ -90,8 +88,17 @@ function shoot(id, look) {
     if (o.isMesh && (!o.visible || o.material.blending === THREE.AdditiveBlending)) drop.push(o);
   });
   for (const o of drop) o.removeFromParent();
+  root.updateMatrixWorld(true);
+  return { root, skier };
+}
+
+function shoot(id, look) {
+  const st = getStage();
+  if (!st) return null;
+  const { root, skier } = makeGearPreview(id, look);
+  st.scene.add(root);
   let url = null;
-  if (frame(st.camera, root)) {
+  if (frameGearPreview(st.camera, root)) {
     st.renderer.render(st.scene, st.camera);
     url = toBlobUrl(st.renderer.domElement.toDataURL('image/png'));
   }

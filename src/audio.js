@@ -1,22 +1,45 @@
 // WebAudio 音效：常规音效现场合成；卡通音效（惨叫、滑哨、弹簧…）用 sfx/ 里的录音。
-// 录音都是 freesound.org 上的 CC0（公有领域）素材，剪过头尾、调平了音量，文件名对应的原始编号：
+// 卡通录音来自 freesound.org 的 CC0 素材，剪过头尾、调平了音量，文件名对应的原始编号：
 //   scream1-6: 751700 751701 751702 416840 577972 697545 · ow1-3: 743350 834326 274717
 //   whistle1: 497093 · fall1: 395443 · boing1-4: 540790 518645 731262 543641
 //   pop1-2: 676000 578640 · plant1: 743678 · mumble1-2: 343911 361071（两条都加了低通，听起来像埋在雪里）
-import MUSIC_URL from './music/black-diamond.mp3';
+import RACE_FALLBACK_URL from './music/black-diamond.mp3';
 import MENU_URL from './music/lobby.mp3';
+import { TRACKS } from './tracks.js';
 
 const SAMPLE_URLS = import.meta.glob('./sfx/*.mp3', { eager: true, query: '?url', import: 'default' });
+// 赛道配乐及 ui*.mp3 使用 m-a-p 的 YuE2-3B 离线生成：https://huggingface.co/m-a-p/YuE2-3B
+const TRACK_MUSIC = import.meta.glob('./music/tracks/*.mp3', { eager: true, query: '?url', import: 'default' });
+const UI_TONES = {
+  click: [760, 560, 0.055],
+  select: [520, 820, 0.085],
+  confirm: [540, 1080, 0.13],
+  back: [620, 350, 0.09],
+  blocked: [255, 165, 0.12],
+};
 
-// 比赛背景音乐：Joth 的《Black Diamond》（opengameart.org/content/black-diamond，CC0），
+function trackMusicId(trackId, theme, seed) {
+  if (trackId) return trackId;
+  // 随机赛道的配乐跟随场景，同一张随机图重开或重连时仍用同一首。
+  const choices = TRACKS.filter((track) => track.theme === theme);
+  return choices.length ? choices[(seed >>> 0) % choices.length].id : null;
+}
+
+// 备用比赛音乐：Joth 的《Black Diamond》（opengameart.org/content/black-diamond，CC0），
 // 一段专门给滑雪 / 冰雪赛道写的鼓打贝斯循环。整首正好 120 小节、每分钟 143 拍，首尾能无缝接上。
-const MUSIC_LEN = (120 * 4 * 60) / 143; // 一圈的长度（秒）
+const FALLBACK_LOOP_LEN = (120 * 4 * 60) / 143;
 const MUSIC_VOL = 0.5; // 相对音效的音量
 const MUSIC_PAUSED = 0.3; // 暂停时压到原来的几成
 // 大厅音乐：自己写的 16 秒循环，C 调，钟琴旋律加一层很轻的和弦。只在菜单里播。
 // 原始 WAV 在 ref/music-src/，第 2 个采样就已经出声，首尾能无缝接上
 const MENU_LEN = 16;
 const MENU_VOL = 0.42;
+
+function decode(ctx, bytes) {
+  return new Promise((resolve, reject) => {
+    ctx.decodeAudioData(bytes, resolve, reject)?.then?.(resolve, reject);
+  });
+}
 
 export class Sfx {
   constructor() {
@@ -25,8 +48,8 @@ export class Sfx {
     this.vol = 0.7;
     this.samples = {}; // 录音：组名 -> AudioBuffer[]
     this.lastAt = {}; // 每组录音上次播放的时间
-    this.musicBuf = null; // 解码好的背景音乐
-    this.musicSrc = null; // 正在播的那一路
+    this.raceMusic = null; // 当前赛道的加载请求或解码缓存
+    this.musicSrc = null; // 正在播的那一路和它自己的淡出增益
     this.musicOn = false; // 现在该不该有音乐（音乐还没解码完时先记着）
     this.menuBuf = null;
     this.menuSrc = null;
@@ -36,29 +59,32 @@ export class Sfx {
 
   init() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume();
+      if (this.ctx.state === 'suspended') this.ctx.resume?.();
       return;
     }
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    const ctx = (this.ctx = new AC());
+    if (!AC || this.audioUnavailable) return;
+    try {
+      this.initGraph(new AC());
+    } catch (error) {
+      this.ctx?.close?.();
+      this.ctx = null;
+      this.audioUnavailable = true;
+      console.warn('音频初始化失败', error);
+    }
+  }
+
+  initGraph(ctx) {
+    this.ctx = ctx;
     this.master = ctx.createGain();
     this.master.gain.value = this.muted ? 0 : this.vol;
     this.master.connect(ctx.destination);
     this.musicGain = ctx.createGain();
+    this.musicGain.gain.value = MUSIC_VOL;
     this.musicGain.connect(this.master);
     this.menuGain = ctx.createGain();
     this.menuGain.gain.value = 0;
     this.menuGain.connect(this.master);
-    this.loadSamples();
-    this.loadMusic();
-    this.loadMenu();
-    // 切到别的标签页时游戏画面会停住，声音也跟着停；画面一恢复刷新（wake）就接着响
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) return;
-      this.asleep = true;
-      ctx.suspend();
-    });
     // 噪声缓冲
     const len = ctx.sampleRate * 2;
     this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -74,7 +100,9 @@ export class Sfx {
     this.windFilter.Q.value = 0.6;
     this.windGain = ctx.createGain();
     this.windGain.gain.value = 0;
-    src.connect(this.windFilter).connect(this.windGain).connect(this.master);
+    src.connect(this.windFilter);
+    this.windFilter.connect(this.windGain);
+    this.windGain.connect(this.master);
     src.start();
     const src2 = ctx.createBufferSource();
     src2.buffer = this.noiseBuf;
@@ -84,7 +112,9 @@ export class Sfx {
     this.carveFilter.frequency.value = 2600;
     this.carveGain = ctx.createGain();
     this.carveGain.gain.value = 0;
-    src2.connect(this.carveFilter).connect(this.carveGain).connect(this.master);
+    src2.connect(this.carveFilter);
+    this.carveFilter.connect(this.carveGain);
+    this.carveGain.connect(this.master);
     src2.start();
     this.snowFilter = ctx.createBiquadFilter();
     this.snowFilter.type = 'bandpass';
@@ -92,14 +122,24 @@ export class Sfx {
     this.snowFilter.Q.value = 0.75;
     this.snowGain = ctx.createGain();
     this.snowGain.gain.value = 0;
-    src2.connect(this.snowFilter).connect(this.snowGain).connect(this.master);
+    src2.connect(this.snowFilter);
+    this.snowFilter.connect(this.snowGain);
+    this.snowGain.connect(this.master);
+    this.loadSamples();
+    this.loadMenu();
+    // 切到后台时暂停声音，恢复刷新后由 wake 接着播。
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) return;
+      this.asleep = true;
+      ctx.suspend?.();
+    });
   }
 
   // 每帧调用：只要画面还在刷新，声音就该是开着的
   wake() {
     if (!this.asleep) return;
     this.asleep = false;
-    this.ctx.resume();
+    this.ctx.resume?.();
   }
 
   setMuted(m) {
@@ -156,7 +196,9 @@ export class Sfx {
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    src.connect(f).connect(g).connect(this.master);
+    src.connect(f);
+    f.connect(g);
+    g.connect(this.master);
     src.start(t, Math.random());
     src.stop(t + dur + 0.05);
   }
@@ -173,7 +215,8 @@ export class Sfx {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g).connect(this.master);
+    o.connect(g);
+    g.connect(this.master);
     o.start(t);
     o.stop(t + dur + 0.05);
   }
@@ -219,6 +262,16 @@ export class Sfx {
     this.tone('sine', 150, 45, 0.2, 0.7 * v);
     this.noise(0.15, 700, 'lowpass', 0.4 * v);
   }
+
+  snowContact(v = 1, load = 0) {
+    if (load > 0.42) {
+      this.noise(0.25, 920, 'lowpass', (0.38 + load * 0.32) * v, 270);
+      this.tone('sine', 124, 54, 0.14, 0.18 * load * v);
+    } else {
+      this.noise(0.13, 2100, 'bandpass', 0.38 * v, 1150);
+      this.noise(0.075, 540, 'lowpass', 0.21 * v);
+    }
+  }
   bleat(v = 1) {
     if (!this.ctx || v < 0.03) return;
     const ctx = this.ctx;
@@ -231,7 +284,8 @@ export class Sfx {
     lfo.frequency.value = 17;
     const lg = ctx.createGain();
     lg.gain.value = 55;
-    lfo.connect(lg).connect(o.frequency);
+    lfo.connect(lg);
+    lg.connect(o.frequency);
     const f = ctx.createBiquadFilter();
     f.type = 'bandpass';
     f.frequency.value = 1300;
@@ -240,32 +294,55 @@ export class Sfx {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.35 * v, t + 0.04);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
-    o.connect(f).connect(g).connect(this.master);
+    o.connect(f);
+    f.connect(g);
+    g.connect(this.master);
     o.start(t);
     lfo.start(t);
     o.stop(t + 0.65);
     lfo.stop(t + 0.65);
   }
   // ---------- 背景音乐 ----------
-  loadMusic() {
-    fetch(MUSIC_URL)
-      .then((r) => r.arrayBuffer())
-      .then((b) => this.ctx.decodeAudioData(b))
-      .then((buf) => {
-        // mp3 解码出来，开头会多一小段空白（各浏览器长短不一）。找到真正出声的位置，循环时把它让开
-        const d = buf.getChannelData(0);
-        let i = 0;
-        while (i < d.length && Math.abs(d[i]) < 0.05) i++;
-        this.musicHead = i / buf.sampleRate;
-        this.musicBuf = buf;
+  prepareMusic(trackId, theme, seed) {
+    if (!this.ctx) return;
+    const id = trackMusicId(trackId, theme, seed);
+    if (this.raceMusic?.id === id) return;
+    this.raceMusic?.controller.abort();
+    const race = { id, controller: new AbortController(), buffer: null, start: 0, end: 0 };
+    this.raceMusic = race;
+    this.loadMusic(race);
+  }
+
+  async loadMusic(race) {
+    const url = TRACK_MUSIC[`./music/tracks/${race.id}.mp3`];
+    const { signal } = race.controller;
+    for (const candidate of url ? [url, RACE_FALLBACK_URL] : [RACE_FALLBACK_URL]) {
+      try {
+        const response = await fetch(candidate, { signal });
+        if (!response.ok) continue;
+        const buf = await decode(this.ctx, await response.arrayBuffer());
+        if (signal.aborted) return;
+        race.buffer = buf;
+        race.end = buf.duration;
+        if (candidate === RACE_FALLBACK_URL) {
+          // 旧曲目的循环点按小节计算，先跨过 MP3 开头的编码空白。
+          const samples = buf.getChannelData(0);
+          const head = samples.findIndex((value) => Math.abs(value) >= 0.05);
+          race.start = Math.max(0, head) / buf.sampleRate;
+          race.end = Math.min(race.start + FALLBACK_LOOP_LEN, buf.duration);
+        }
         if (this.musicOn) this.musicStart();
-      })
-      .catch(() => {});
+        return;
+      } catch {
+        if (signal.aborted) return;
+      }
+    }
+    if (this.raceMusic === race) this.raceMusic = null;
   }
   loadMenu() {
     fetch(MENU_URL)
       .then((r) => r.arrayBuffer())
-      .then((b) => this.ctx.decodeAudioData(b))
+      .then((b) => decode(this.ctx, b))
       .then((buf) => {
         // mp3 开头的编码空白要跳过，否则循环处会断一下
         const d = buf.getChannelData(0);
@@ -309,37 +386,54 @@ export class Sfx {
   musicStart() {
     this.menuStop(0.3);
     this.musicOn = true;
-    if (!this.musicBuf || this.musicSrc) return;
+    const race = this.raceMusic;
+    if (!race?.buffer || this.musicSrc) return;
     const t = this.ctx.currentTime;
-    const src = (this.musicSrc = this.ctx.createBufferSource());
-    src.buffer = this.musicBuf;
+    const src = this.ctx.createBufferSource();
+    const gain = this.ctx.createGain();
+    this.musicSrc = { src, gain };
+    src.buffer = race.buffer;
     src.loop = true;
-    src.loopStart = this.musicHead;
-    src.loopEnd = Math.min(this.musicHead + MUSIC_LEN, this.musicBuf.duration);
-    src.connect(this.musicGain);
-    this.musicGain.gain.cancelScheduledValues(t);
-    this.musicGain.gain.setValueAtTime(MUSIC_VOL, t);
-    src.start(t, this.musicHead);
+    src.loopStart = race.start;
+    src.loopEnd = race.end;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(1, t + 0.2);
+    src.connect(gain);
+    gain.connect(this.musicGain);
+    src.onended = () => {
+      src.disconnect();
+      gain.disconnect();
+    };
+    src.start(t, race.start);
   }
   // 用 fade 秒淡出后停掉
   musicStop(fade = 0.4) {
     this.musicOn = false;
-    const src = this.musicSrc;
-    if (!src) return;
+    if (!this.musicSrc) return;
+    const { src, gain } = this.musicSrc;
     this.musicSrc = null;
     const t = this.ctx.currentTime;
+    const currentGain = gain.gain.value;
     // 每一路音乐走自己的淡出，这样马上再开下一局也不会被这次淡出压住
-    const g = this.ctx.createGain();
-    g.gain.setValueAtTime(1, t);
-    g.gain.linearRampToValueAtTime(0, t + fade);
-    src.disconnect();
-    src.connect(g).connect(this.musicGain);
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(currentGain, t);
+    gain.gain.linearRampToValueAtTime(0, t + fade);
     src.stop(t + fade + 0.05);
   }
   // 暂停时把音乐压低，继续时恢复
   musicDuck(on) {
     if (!this.ctx) return;
     this.musicGain.gain.setTargetAtTime(on ? MUSIC_VOL * MUSIC_PAUSED : MUSIC_VOL, this.ctx.currentTime, 0.12);
+  }
+
+  uiSound(kind) {
+    if (!this.ctx || this.muted) return;
+    const name = `ui${kind}`;
+    if (this.samples[name]?.some(Boolean)) {
+      this.sample(name, 0.62, { gap: 0.04, group: 'ui' });
+    } else {
+      this.tone('triangle', ...UI_TONES[kind], 0.12);
+    }
   }
 
   // ---------- 卡通音效（录音） ----------
@@ -350,7 +444,7 @@ export class Sfx {
       if (!m) continue;
       fetch(url)
         .then((r) => r.arrayBuffer())
-        .then((b) => this.ctx.decodeAudioData(b))
+        .then((b) => decode(this.ctx, b))
         .then((buf) => {
           (this.samples[m[1]] ||= [])[m[2] - 1] = buf;
         })
@@ -371,7 +465,8 @@ export class Sfx {
     src.playbackRate.value = rate;
     const g = this.ctx.createGain();
     g.gain.value = v;
-    src.connect(g).connect(this.master);
+    src.connect(g);
+    g.connect(this.master);
     src.start(t + delay);
   }
   // 每个选手嗓门不一样：按编号错开音调

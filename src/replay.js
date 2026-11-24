@@ -7,7 +7,7 @@ import { clamp, lerp, damp } from './util.js';
 
 const STEP = 0.05;
 const MAX_FRAMES = 6000; // 最多记 5 分钟
-const F = 16; // 每人每帧几个数：位置 3、朝向 4、翻滚 4、转向、速度、开关、解冻、手上道具
+const F = 17; // 位置 3、朝向 4、翻滚 4、转向、速度、开关、解冻、手上道具、落地屈膝
 const PROPS = [null, 'tube', 'gun', 'gatling'];
 const TUCK = 1;
 const BRAKE = 2;
@@ -38,6 +38,7 @@ export class Replay {
     this.puppets = [];
     this.btnShown = null;
     this.reset();
+    if (game.mini) return;
     $('btnReplay').addEventListener('click', () => this.play());
     $('btnSkip').addEventListener('click', () => this.stop());
     window.addEventListener(
@@ -124,6 +125,7 @@ export class Replay {
         (s.frozen ? FROZEN : 0) | (s.boost ? BOOST : 0) | (s.grab ? GRAB : 0) | (sk.group.visible && !r.out ? SHOWN : 0) | (sk.shield.visible ? SHIELD : 0);
       d[o + 14] = s.thaw || 0;
       d[o + 15] = sk.propTube.visible ? 1 : sk.propGun.visible ? 2 : sk.propGatling.visible ? 3 : 0;
+      d[o + 16] = s.landing || 0;
     }
     this.frames.push({ t, d });
     if (this.frames.length > MAX_FRAMES) this.frames.shift();
@@ -155,8 +157,10 @@ export class Replay {
       return p;
     });
     this.on = true;
-    document.body.classList.add('replaying');
-    $('replayBar').classList.remove('hidden');
+    if (!g.mini) {
+      document.body.classList.add('replaying');
+      $('replayBar').classList.remove('hidden');
+    }
   }
 
   stop() {
@@ -168,8 +172,10 @@ export class Replay {
       r.skier.group.visible = !r.out;
       r.trail.mesh.visible = true;
     }
-    $('replayBar').classList.add('hidden');
-    document.body.classList.remove('replaying');
+    if (!this.game.mini) {
+      $('replayBar').classList.add('hidden');
+      document.body.classList.remove('replaying');
+    }
   }
 
   // 每出一帧画面调用一次（dt 是真实时间）
@@ -227,6 +233,7 @@ export class Replay {
         hasProp: a[o + 15] > 0,
         boost: !!(fl & BOOST),
         grab: !!(fl & GRAB),
+        landing: lerp(a[o + 16], b[o + 16], k),
       });
     }
     for (const r of g.racers) {
@@ -277,6 +284,6 @@ export class Replay {
     const show = this.game.state === 'results' && !!this.best();
     if (show === this.btnShown) return;
     this.btnShown = show;
-    $('btnReplay').classList.toggle('hidden', !show);
+    if (!this.game.mini) $('btnReplay').classList.toggle('hidden', !show);
   }
 }

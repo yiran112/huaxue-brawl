@@ -206,6 +206,48 @@ function roadSign(course, kit, group, d, side, text, bg, fg, u = 3) {
   signPlane(group, text, x, y + 2.6, z, h, 5, bg, fg);
 }
 
+export function buildRouteSigns(course) {
+  const kit = new Kit();
+  const group = new THREE.Group();
+  group.name = 'route-signs';
+  const mark = (x, d, color, h) => {
+    kit.setFrame(x, course.surfaceY(x, -d) - 0.12, -d);
+    kit.cyl(0.09, 0.13, h, 6, color, 0, h / 2, 0);
+    kit.cyl(0.13, 0.13, 0.4, 6, 0xffefca, 0, h - 0.29, 0);
+  };
+  const inTunnel = (d) => course.landmarks.some((m) => m.type === 'tunnel' && d > m.d0 - 8 && d < m.d1 + 8);
+  for (let d = 30; d < course.L - 32; d += 32) {
+    if (inTunnel(d)) continue;
+    const x = course.cx(d);
+    const w = course.halfWidth(d) - 0.35;
+    for (const s of [-1, 1]) mark(x + s * w, d, 0x147789, 2.25);
+  }
+  kit.clearFrame();
+  let last = 0;
+  for (let d = 85; d < course.L - 95; d += 16) {
+    const turn = course.headingAt(d - 22) - course.headingAt(d + 28);
+    if (Math.abs(turn) < 0.25 || d - last < 105 || inTunnel(d - 44)) continue;
+    if (course.branches.some((b) => Math.abs(d - b.gate.d) < 110)) continue;
+    const side = Math.sign(turn);
+    for (const lead of [44, 19]) {
+      if (!inTunnel(d - lead)) roadSign(course, kit, group, d - lead, -side, side > 0 ? '❯ ❯' : '❮ ❮', '#175580', '#ffffff', 0.55);
+    }
+    last = d;
+  }
+  for (const b of course.branches) {
+    const side = b.sg;
+    for (const lead of [82, 43]) {
+      roadSign(course, kit, group, b.gate.d - lead, side, side > 0 ? '近道 ›' : '‹ 近道', '#78470e', '#fff2c2', 0.8);
+    }
+    for (const s of [-1, 1]) {
+      const off = s * 4.5;
+      mark(b.gate.x + Math.cos(b.gate.phi) * off, b.gate.d - Math.sin(b.gate.phi) * off, 0xe89324, 4.15);
+    }
+  }
+  kit.finish(group);
+  course.group.add(group);
+}
+
 // ---------- 村庄 ----------
 function village(course, m, kit, group) {
   const snow = course.theme.snow;
@@ -269,14 +311,30 @@ function cabin(course, kit, it) {
   kit.box(w, H + 0.5, dep, wall, 0, (H + 0.5) / 2, 0);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) kit.box(0.42, H + 0.5, 0.42, WOOD_D, sx * (w / 2), (H + 0.5) / 2, sz * (dep / 2));
   const base = H + 0.5;
+  const roof = CABIN_ROOF[it.color];
   const rise = dep * 0.42 + 0.8;
-  kit.prism(w + 0.9, dep / 2 + 0.6, rise, CABIN_ROOF[it.color], 0, base, 0);
-  kit.prism(w + 0.6, dep / 2 + 0.7, rise + 0.1, snow, 0, base + 0.16, 0);
+  const windowY = 0.5 + H * 0.58;
+  for (const sy of [0.25, 0.46, 0.69, 0.84]) {
+    kit.box(w + 0.065, 0.046, dep + 0.065, WOOD_D, 0, base * sy, 0);
+  }
+  kit.box(w + 0.31, 0.2, dep + 0.31, WOOD_D, 0, base - 0.03, 0);
+  kit.prism(w + 0.9, dep / 2 + 0.6, rise, roof, 0, base, 0);
+  kit.prism(w + 0.67, dep / 2 + 0.71, rise + 0.06, snow, 0, base + 0.22, 0);
+  kit.box(w + 0.57, 0.14, 0.28, snow, 0, base + rise + 0.29, 0);
   kit.box(0.7, rise + 0.8, 0.7, 0x6a5a50, w * 0.28, base + rise * 0.55, dep * 0.15);
+  kit.box(0.89, 0.14, 0.88, snow, w * 0.28, base + rise * 1.05 + 0.45, dep * 0.15);
+  kit.box(1.3, 2.16, 0.17, roof, 0, 1.54, -dep / 2 - 0.032);
   kit.box(1.1, 2.0, 0.12, WOOD_D, 0, 1.5, -dep / 2 - 0.05);
+  kit.box(0.095, 0.085, 0.07, 0xe5ad5d, 0.37, 1.44, -dep / 2 - 0.124);
   for (const sx of [-1, 1]) {
-    kit.box(1.0, 0.85, 0.1, 0xffd27a, sx * w * 0.3, 0.5 + H * 0.58, -dep / 2 - 0.06, 0, 0, 0, 'glow');
-    kit.box(0.1, 0.85, 1.0, 0xffd27a, sx * (w / 2 + 0.06), 0.5 + H * 0.58, 0, 0, 0, 0, 'glow');
+    const x = sx * w * 0.3;
+    kit.box(1.2, 1.03, 0.13, WOOD_D, x, windowY, -dep / 2 - 0.05);
+    kit.box(1.0, 0.81, 0.07, 0xffd27a, x, windowY, -dep / 2 - 0.1, 0, 0, 0, 'glow');
+    kit.box(0.084, 0.93, 0.05, WOOD_D, x, windowY, -dep / 2 - 0.135);
+    kit.box(1.22, 0.11, 0.26, snow, x, windowY - 0.49, -dep / 2 - 0.13);
+    kit.box(0.17, 1.02, 1.2, WOOD_D, sx * (w / 2 + 0.04), windowY, 0);
+    kit.box(0.074, 0.81, 1.0, 0xffd27a, sx * (w / 2 + 0.10), windowY, 0, 0, 0, 0, 'glow');
+    kit.box(0.045, 0.92, 0.085, WOOD_D, sx * (w / 2 + 0.14), windowY, 0);
   }
   kit.clearFrame();
   course.addObstacle(it.x, it.z, Math.max(w, dep) * 0.55, 'rock');

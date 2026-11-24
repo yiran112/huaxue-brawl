@@ -58,4 +58,4 @@ function hostFrame() {
   return true;
 }
 
-if (!hostFrame()) import('./main.js');
+if (!hostFrame()) import('./browser.js');

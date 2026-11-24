@@ -5,7 +5,6 @@ import { GEAR, LOOK_EXTRA_DEFAULTS, COSMETIC_SLOTS, uniformUp, pickBotGear } fro
 import { CEDAR_PRACTICE, PRACTICE_SECONDS, TRACK_MAP } from './tracks.js';
 import { RANK_LV, RANK_MAP, scoreLeave, ESCAPE_EXTRA } from './rank.js';
 import { Profile, cleanNick, randomNick } from './profile.js';
-import { Account } from './account.js';
 import { makeMode, TEAM_NAMES } from './modes.js';
 import { Hazards, NO_HAZARDS } from './hazards.js';
 import { GhostRecorder, GhostRunner, loadGhost, saveGhost } from './ghost.js';
@@ -17,14 +16,13 @@ import { Sfx } from './audio.js';
 import { Items, Weapons, Deer } from './weapons.js';
 import { buildArch, buildChairlift, glowTexture, canvasTex } from './props.js';
 import { Showroom, STAGE_TOP } from './showroom.js';
-import { UI, esc } from './ui.js';
-import { RaceHud } from './racehud.js';
+import { esc } from './ui/common.js';
 import { Quality } from './quality.js';
-import { Touch } from './touch.js';
 import { Emotes } from './emotes.js';
 import { Replay } from './replay.js';
 import { Net } from './net.js';
-import { clamp, lerp, damp, wrapAngle, fmtTime } from './util.js';
+import { Departure } from './departure.js';
+import { clamp, lerp, damp, smooth, wrapAngle, fmtTime } from './util.js';
 
 const LS_RULES = 'huaxue_rules_v1';
 const LS_LOOK = 'huaxue_look_v1';
@@ -70,8 +68,9 @@ const START_LATE = 0.25;
 const BOT_START = [0.25, 0.45, 0.7]; // 机器人起步喷的概率（按难度）
 const FINISH_SLOW = 1.4; // 单机冲线后慢镜头持续几秒（真实时间）
 
-class Game {
-  constructor() {
+export class Game {
+  constructor({ Account, UI, RaceHud, Touch, mini = null }) {
+    this.mini = mini;
     this.profile = new Profile();
     this.account = new Account(this);
     this.profile.onSave = () => this.account.noteChanged();
@@ -141,6 +140,8 @@ class Game {
     this.botNames = BOT_NAMES.slice();
     this.raceTime = 0;
     this.camYaw = 0;
+    this.camLead = 0;
+    this.camPitch = 0;
     this.orbit = 0;
     this.trailColor = 0x6f8fd0;
 
@@ -152,11 +153,11 @@ class Game {
     this.quality.apply();
     this.weapons = new Weapons(this);
     this.ui = new UI(this);
-    this.hud = new RaceHud(this);
+    this.hud = RaceHud ? new RaceHud(this) : null;
     this.touch = new Touch(this);
     this.emotes = new Emotes(this);
     this.replay = new Replay(this);
-    this.beatPresence();
+    if (!mini || mini.online) this.beatPresence();
     this.seed = (Math.random() * 1e9) | 0;
     this.themeKey = this.resolveTheme();
     this.buildWorld();
@@ -165,11 +166,11 @@ class Game {
       this.resumeSeat();
       this.joinInvite();
     });
-    this.bindInput();
+    if (!mini) this.bindInput();
     this.clock = new THREE.Clock();
     this.frameAt = 0;
     this.renderer.setAnimationLoop(() => this.frame());
-    this.initBackgroundTick();
+    if (!mini) this.initBackgroundTick();
   }
 
   // 联机比赛时窗口切到后台（或被最小化、被别的窗口挡住），浏览器会停掉画面刷新。
@@ -202,9 +203,17 @@ class Game {
   // ---------- 初始化 ----------
   initRenderer() {
     const canvas = document.getElementById('c');
-    const renderer = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }));
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    const renderer = (this.renderer = new THREE.WebGLRenderer({
+      canvas, antialias: !this.mini, powerPreference: 'high-performance',
+      ...(this.mini ? { context: this.mini.context } : null),
+    }));
+    if (this.mini) renderer.setClearAlpha(1);
+    const resize = () => {
+      if (this.mini) this.mini.display.resize(renderer);
+      else renderer.setSize(window.innerWidth, window.innerHeight, false);
+    };
+    if (!this.mini) renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    resize();
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene();
@@ -224,7 +233,7 @@ class Game {
     this.scene.add(sun, sun.target);
     this.sunDir = new THREE.Vector3(0.5, 0.6, 0.3).normalize();
     window.addEventListener('resize', () => {
-      renderer.setSize(window.innerWidth, window.innerHeight, false);
+      resize();
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
     });
@@ -430,6 +439,7 @@ class Game {
   }
 
   clearRace() {
+    this.clearDeparture();
     this.clearImpact();
     this.replay?.reset();
     this.emotes?.clear();
@@ -454,22 +464,24 @@ class Game {
   }
 
   // ---------- 大厅 ----------
-  buildLobby() {
+  buildLobby(looks = null, withCable = true) {
     this.disposeLobby();
     const c = this.course;
     const g = (this.lobby = new THREE.Group());
     const z = 36;
     g.position.set(0, c.height(0, z) + 13, z);
     g.rotation.y = Math.PI;
-    g.add(buildChairlift());
+    g.add(buildChairlift(withCable));
     this.lobbySkiers = [];
     // 单机：自己 + 机器人；匹配中：缆车上坐的是已经匹配到的玩家
-    const looks = [];
-    if (this.matchPlayers) {
-      for (const p of this.matchPlayers) looks.push(p.look);
-    } else {
-      const bots = this.rules.mode === 'tt' ? 0 : this.rules.mode === 'team' ? 7 : this.rules.bots;
-      for (let i = 0; i < 1 + bots; i++) looks.push(i === 0 ? this.look : this.botLooks[(i - 1) % 7]);
+    if (!looks) {
+      looks = [];
+      if (this.matchPlayers) {
+        for (const p of this.matchPlayers) looks.push(p.look);
+      } else {
+        const bots = this.rules.mode === 'tt' ? 0 : this.rules.mode === 'team' ? 7 : this.rules.bots;
+        for (let i = 0; i < 1 + bots; i++) looks.push(i === 0 ? this.look : this.botLooks[(i - 1) % 7]);
+      }
     }
     const n = Math.min(8, looks.length);
     // 玩家坐中间
@@ -742,7 +754,7 @@ class Game {
         up: practice ? null : i === 0 ? this.profile.up(this.look.gear) : botUp,
       });
     }
-    this.beginRace(newCourse, roster, 0);
+    this.beginRace(newCourse, roster, 0, this.state === 'menu');
   }
 
   // 一局里玩家自己的统计（结算奖励、挑战判定用）
@@ -808,7 +820,7 @@ class Game {
   }
 
   // roster：按发车位排好的选手名单 [{ name, look, bot, id }]；me：自己是第几个
-  beginRace(newCourse, roster, me) {
+  beginRace(newCourse, roster, me, fromLobby = false) {
     this.sfx.init();
     this.sfx.menuStop(0.4);
     this.ui.showMenu(false);
@@ -821,6 +833,8 @@ class Game {
     this.syncShow(false);
     if (newCourse) this.buildWorld();
     else this.clearRace();
+    this.sfx.prepareMusic(this.course.def?.id, this.themeKey, this.seed);
+    this.sfx.musicDuck(false);
     const online = this.net.active;
     this.mode = makeMode(MODES[this.rules.mode] ? this.rules.mode : 'race', this);
     const xs = [-2.2, 2.2, -6.6, 6.6];
@@ -883,18 +897,48 @@ class Game {
     this.fireQ = false;
     this.spaceFlip = false;
     this.camYaw = 0;
+    this.camLead = 0;
+    this.camPitch = 0;
     this.orbit = 0;
     this.updateOrder();
     this.ui.resetHud();
+    if (fromLobby) {
+      this.buildLobby([roster[me].look, ...roster.filter((_, i) => i !== me).map((r) => r.look)], false);
+      this.departure = new Departure(this);
+      this.ui.showHud(false);
+      this.ui.showDeparture(true);
+      this.departure.update(0);
+    } else {
+      this.showStartGrid();
+    }
+  }
+
+  showStartGrid() {
+    for (const r of this.racers) r.update(0);
     this.ui.showHud(true);
     const p = this.player;
-    this.camera.position.set(p.pos.x, p.pos.y + 3.2, p.pos.z + 8);
     this.camera.fov = 62;
     this.camera.updateProjectionMatrix();
+    this.camera.position.set(p.pos.x, p.pos.y + 2.85, p.pos.z + 5.4);
+    this.updateCamera(1, true);
+  }
+
+  clearDeparture() {
+    if (!this.departure) return;
+    this.departure = null;
+    this.disposeLobby();
+    this.ui.showDeparture(false);
+  }
+
+  finishDeparture() {
+    if (!this.departure) return;
+    this.clearDeparture();
+    this.showStartGrid();
+    if (this.waitGo && this.net.active) this.readyAtGrid();
   }
 
   setPaused(b) {
-    if (!['countdown', 'race', 'finished'].includes(this.state)) return;
+    if (this.departure || !['countdown', 'race', 'finished'].includes(this.state)) return;
     // 联机时只是打开菜单，比赛照常进行（见 frame）
     const online = this.net.active;
     this.paused = b;
@@ -1050,6 +1094,12 @@ class Game {
 
   // 打开的是邀请链接（?room=房间号）：直接进那个房间
   joinInvite() {
+    if (this.mini) {
+      if (!this.mini.online || this.state !== 'menu' || this.netMode) return;
+      const id = this.mini.takeInvite();
+      if (id) this.joinListed(id);
+      return;
+    }
     const url = new URL(location.href);
     const id = parseInt(url.searchParams.get('room') || '', 10);
     if (!url.searchParams.has('room')) return;
@@ -1097,7 +1147,7 @@ class Game {
     if (!this.netMode) return;
     this.matchPlayers = null;
     this.netRaceSetup(m);
-    this.beginRace(true, m.roster, m.you | 0);
+    this.beginRace(true, m.roster, m.you | 0, true);
     if (m.key) save(LS_SEAT, { key: m.key, at: Date.now(), beat: Date.now(), tab: this.tabId });
     if (this.session.kind === 'rank') {
       // 先记一笔「排位进行中」并马上存到服务器，中途关网页的话下次打开按逃跑补扣
@@ -1106,6 +1156,10 @@ class Game {
     }
     // 各人机器快慢不一样，等所有人都加载完再一起倒计时
     this.waitGo = true;
+    if (!this.departure) this.readyAtGrid();
+  }
+
+  readyAtGrid() {
     this.ui.tip('等待其他玩家加载赛道…', 20);
     this.net.sendJson({ t: 'ready' });
   }
@@ -1138,6 +1192,7 @@ class Game {
   onNetGo() {
     if (!this.waitGo) return;
     this.waitGo = false;
+    this.finishDeparture();
     this.countT = 3.9;
     this.lastCount = '';
     this.upAt = -1;
@@ -1709,6 +1764,22 @@ class Game {
     if (v > 0.02) this.sfx[name](v, arg);
   }
 
+  onSnowContact(r, load) {
+    const p = r.pos;
+    const sideways = r.right;
+    const count = Math.round(7 + load * 11);
+    for (let i = 0; i < count; i++) {
+      const side = (Math.random() - 0.5) * 2;
+      const spread = side * (1.4 + load * 5.2);
+      this.fx.spray(
+        p.x + sideways.x * side * 0.48, p.y + 0.12, p.z + sideways.z * side * 0.48,
+        r.vel.x * 0.10 + sideways.x * spread, 0.45 + Math.random() * (0.95 + load * 2.1),
+        r.vel.z * 0.10 + sideways.z * spread, 0.043 + Math.random() * (0.045 + load * 0.10),
+      );
+    }
+    this.sfxAt('snowContact', p, 0.74 + load * 0.25, load);
+  }
+
   onPlant(r) {
     this.fx.snowBurst(r.pos, 16, 9);
     this.sfxAt('plop', r.pos, 1);
@@ -1854,6 +1925,7 @@ class Game {
   }
 
   impactRect() {
+    if (this.mini) return this.ui.impactRect();
     const el = document.getElementById('impact');
     if (!el || el.classList.contains('hidden')) return null;
     const canvas = this.renderer.domElement.getBoundingClientRect();
@@ -2065,6 +2137,11 @@ class Game {
       arm();
       // 正在输入昵称：别把字母当成游戏按键
       if (e.target && e.target.tagName === 'INPUT') return;
+      if (this.departure && is(e, 'Escape', 'Space', ' ')) {
+        e.preventDefault();
+        this.finishDeparture();
+        return;
+      }
       const a = act(e);
       if (a) {
         if (a === 'up' && !this.keys.up) this.noteUp();
@@ -2121,7 +2198,7 @@ class Game {
   // 按下 W：倒计时里记下离“冲”还有几秒；刚喊完“冲”才按的，给个普通起步
   // tap：触屏点了一下（触屏是自动俯冲，不用按住）
   noteUp(tap = false) {
-    if (this.state === 'countdown' && !this.waitGo) {
+    if (this.state === 'countdown' && !this.departure && !this.waitGo) {
       this.upAt = this.countT - 0.9;
       this.upTap = tap;
     } else if (this.state === 'race' && this.startWin && this.time < this.startWin && this.player && this.player.owned) {
@@ -2184,8 +2261,11 @@ class Game {
       this.update(sim);
       this.replay.frame(dt);
     }
-    this.renderer.render(this.scene, this.replay.on ? this.replay.cam : this.camera);
+    const view = this.replay.on ? this.replay.cam : this.camera;
+    if (this.mini) this.mini.display.drawScene(this.renderer, this.scene, view);
+    else this.renderer.render(this.scene, view);
     this.renderImpact();
+    this.ui.draw?.();
   }
 
   update(dt) {
@@ -2197,6 +2277,8 @@ class Game {
         if (!this.customRoom) this.ui.tickQueue();
         else if (this.matchPlayers) this.ui.tickMatch(this.matchEnd - performance.now());
       }
+    } else if (this.departure) {
+      if (this.departure.update(dt)) this.finishDeparture();
     } else if (this.state === 'countdown') this.updateCountdown(dt);
     else this.updateRace(dt);
     if (this.course) this.course.update(dt);
@@ -2207,7 +2289,8 @@ class Game {
     if (this.snowfall) this.snowfall.update(dt, this.camera.position);
     if (this.state !== 'menu') {
       this.ui.update(dt);
-      this.hud.update(dt);
+      this.hud?.update(dt);
+      this.touch.update?.(dt);
       this.emotes.update(dt);
     }
     this.updateImpact(dt);
@@ -2302,7 +2385,7 @@ class Game {
       this.ui.setCount('冲！');
       this.goT = 0.9;
       this.sfx.beep(true);
-      if (!this.course.def?.practice) this.sfx.musicStart();
+      this.sfx.musicStart();
       for (const r of this.racers) {
         if (!r.owned) continue; // 别人的角色等他自己出发
         r.state = 'ski';
@@ -2414,6 +2497,7 @@ class Game {
       if (practice && this.raceTime >= PRACTICE_SECONDS - 1e-6) {
         this.raceTime = PRACTICE_SECONDS;
         this.state = 'results';
+        this.sfx.musicStop(1.5);
         this.sfx.silenceRide();
         this.ui.showHud(false);
         this.ui.showResults({
@@ -2539,8 +2623,19 @@ class Game {
       let wantYaw = p.yaw;
       if (p.state === 'tumble' && p.speed > 3) wantYaw = Math.atan2(-p.vel.x, -p.vel.z);
       this.camYaw += wrapAngle(wantYaw - this.camYaw) * damp(p.state === 'tumble' ? 2 : 5.5, dt);
+      const canLead = this.state === 'race' && p.state === 'ski' && p.vel.z < -3;
+      let leadYaw = 0;
+      if (canLead) {
+        const lead = clamp(13 + p.speed * 0.65, 16, 48);
+        const branch = p.inShort;
+        const deltaX = course.routeX(p.d + lead, branch) - course.routeX(p.d, branch);
+        const deltaYaw = wrapAngle(Math.atan2(-deltaX, lead) - this.camYaw);
+        const align = 1 - smooth(0.35, 1.1, Math.abs(deltaYaw));
+        leadYaw = clamp(deltaYaw * 0.62, -0.29, 0.29) * align;
+      }
+      this.camLead = lerp(this.camLead, leadYaw, damp(4.5, dt));
       const back = p.ride ? 4.6 : 4.9;
-      const up = p.ride ? 2.75 : 2.3;
+      const up = (p.ride ? 2.75 : 2.3) - p.landingPress * 0.28;
       _v.set(p.pos.x + Math.sin(this.camYaw) * back, p.pos.y + up, p.pos.z + Math.cos(this.camYaw) * back);
       _v.y = Math.max(_v.y, course.height(_v.x, _v.z) + 1.5);
       if (snap) cam.position.lerp(_v, damp(3, dt));
@@ -2552,9 +2647,13 @@ class Game {
       }
       const minY = course.height(cam.position.x, cam.position.z) + 1.0;
       if (cam.position.y < minY) cam.position.y = minY;
-      _v2.set(p.pos.x - Math.sin(this.camYaw) * 7, p.pos.y + 1.5, p.pos.z - Math.cos(this.camYaw) * 7);
+      const aimYaw = this.camYaw + this.camLead;
+      const aimDist = canLead ? clamp(7 + p.speed * 0.13, 7, 14) : 7;
+      _v2.set(p.pos.x - Math.sin(aimYaw) * aimDist, p.pos.y + 1.5, p.pos.z - Math.cos(aimYaw) * aimDist);
       const gh = course.height(_v2.x, _v2.z) + 1.0;
-      _v2.y = lerp(_v2.y, gh, 0.6);
+      const pitch = clamp(gh - _v2.y, -4.8, 3.6) * (p.grounded ? 0.54 : 0.26);
+      this.camPitch = lerp(this.camPitch, pitch, damp(5.8, dt));
+      _v2.y += this.camPitch;
       cam.lookAt(_v2);
       targetFov = 60 + Math.min(p.speed, 62) * 0.42 + (p.boostT > 0 || p.nitroT > 0 ? 8 : 0);
       if (p.ride) targetFov = 57 + Math.min(p.speed, 52) * 0.28;
@@ -2572,5 +2671,3 @@ class Game {
     this.focusShadow(p.pos);
   }
 }
-
-window.game = new Game();

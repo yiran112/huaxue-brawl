@@ -9,6 +9,16 @@ export const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '
 export const TIER_ICONS = ['🥉', '🥈', '🥇', '💠', '💎', '🌟', '👑'];
 // 改装币的小图标（样式 .tcn 在 index.html）
 export const PART_ICON = '<i class="tcn">T</i>';
+export const THEME_ICON = { day: '☀️', sunset: '🌄', storm: '🌨️', night: '🌌' };
+export const MODE_STYLE = {
+  race: { en: 'ITEM RACE', c: ['#ffab3d', '#ef5f17'], rec: true },
+  speed: { en: 'RACING', c: ['#3f9bff', '#2152d4'], rec: true },
+  elim: { en: 'ELIMINATION', c: ['#ff5c78', '#c41f45'] },
+  team: { en: 'TEAM', c: ['#2fcfa8', '#11876f'] },
+  brawl: { en: 'BRAWL', c: ['#a56bff', '#6527d6'] },
+  trick: { en: 'TRICK', c: ['#ff74c8', '#cf2f8d'] },
+  tt: { en: 'TIME TRIAL', c: ['#4fd0f0', '#2775b8'] },
+};
 
 // 展厅页：角色站在中间的展台上，左边一列竖排子页签，右边信息面板。
 // label 是展台背后的全息大字；subs：[子页 key, 名字, 英文小字]，第一个是默认子页

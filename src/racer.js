@@ -7,6 +7,7 @@ import { clamp, lerp, damp, wrapAngle } from './util.js';
 import { WEAPONS } from './config.js';
 import { gearMods, trailColor } from './gear.js';
 import { Chain } from './chain.js';
+import { landingLoad, landingSpeedFactor } from './landing.js';
 
 const G = 24;
 const TAU = Math.PI * 2;
@@ -126,6 +127,7 @@ export class Racer {
     this.plantK = 0; // 埋进雪里的程度 0~1（画面用）
     this.planted = false; // 这次被击飞已经栽过一回
     this.airT = 0;
+    this.landingPress = 0;
     this.spinAxis = new THREE.Vector3(1, 0, 0);
     this.spinSpeed = 0;
     this.d = 0;
@@ -169,6 +171,7 @@ export class Racer {
     this.up.copy(this.normal);
     this.grounded = true;
     this.d = -z;
+    this.landingPress = 0;
     this.trail.reset();
     if (this.ride) {
       this.scrapeTrail.reset();
@@ -285,7 +288,7 @@ export class Racer {
   }
 
   // 落地结算这次腾空：空翻 / 转体转够整圈就加速，没转正就摔；抓板要在落地前松手；滞空久了也算一招
-  landAir(airT) {
+  landAir(airT, impact) {
     const tol = this.mods.flipTol;
     const turns = this.flip / TAU;
     const n = Math.round(turns);
@@ -298,12 +301,21 @@ export class Racer {
     const headDown = Math.cos(this.flip) < -0.2;
     const grab = this.grabT;
     const sloppy = this.grabbing;
+    const horizontalSpeed = Math.hypot(this.vel.x, this.vel.z);
+    const travelYaw = Math.atan2(-this.vel.x, -this.vel.z);
+    const headingError = horizontalSpeed > 6 ? Math.abs(wrapAngle(travelYaw - this.yaw - this.spinA)) : 0;
     this.clearAir();
     if (ferr > FLIP_TOL * tol || serr > SPIN_TOL * tol) {
       _v.set(0, 4, 0);
       if (!this.knock(_v, 1.2, null, ferr > FLIP_TOL * tol ? '空翻没转完' : '转体没转完')) this.vel.multiplyScalar(0.6);
       else if (headDown) this.plant();
       return;
+    }
+    if (airT >= 0.18 || impact > 5) {
+      const load = landingLoad(impact, headingError, Math.max(ferr, serr));
+      this.vel.addScaledVector(this.normal, impact);
+      if (!sloppy) this.vel.multiplyScalar(landingSpeedFactor(load));
+      this.showLanding(sloppy ? Math.max(0.82, load) : load);
     }
     const chain = this.chain;
     const parts = [];
@@ -345,6 +357,11 @@ export class Racer {
     this.addNitro(Math.min(3, Math.abs(n)) * 0.12 + Math.min(3, Math.abs(sn)) * 0.1 + grabOk * 0.1 + (airT > 1.2 ? 0.05 : 0));
     if (n !== 0 || sn !== 0) this.game.weapons.evade(this);
     if (parts.length) this.game.onLanded?.(this, parts, grabOk);
+  }
+
+  showLanding(load) {
+    this.landingPress = 0.46 + 0.54 * load;
+    if (this.game.nearCamera(this.pos, 155)) this.game.onSnowContact(this, load);
   }
 
   // 预估还要多久落地（机器人决定翻不翻跟头用）
@@ -702,8 +719,8 @@ export class Racer {
       course.normal(this.pos.x, this.pos.z, this.normal);
       this.grounded = true;
       if (wasAir) {
-        const impact = -vel.dot(this.normal);
-        if (impact > 3) {
+        const impact = Math.max(0, -vel.dot(this.normal));
+        if (this.state === 'tumble' && impact > 3) {
           game.fx.snowBurst(this.pos, Math.min(10, 3 + impact * 0.4), Math.min(9, impact * 0.5));
           game.sfxAt('thud', this.pos, Math.min(1, impact / 22));
         }
@@ -717,7 +734,8 @@ export class Racer {
           this.pos.y += 0.05;
           game.sfxAt('boing', this.pos, Math.min(1, impact / 12));
         } else if (this.state === 'ski') {
-          this.landAir(this.airT);
+          this.landAir(this.airT, impact);
+          this.speed = Math.hypot(vel.x, vel.z);
         }
         this.airT = 0;
       }
@@ -807,7 +825,7 @@ export class Racer {
       if (this.speed < 2.5 && !(this.isPlayer && inp.brake)) {
         const before = this.stuckT;
         this.stuckT += dt;
-        if (this.isPlayer && before < 2.5 && this.stuckT >= 2.5) game.tip('卡住了？转向后按 W 撑杖，或按 R 复位', 3);
+        if (this.isPlayer && before < 2.5 && this.stuckT >= 2.5) game.tip(game.autoTuck ? '卡住了？转个方向试试，或点右上角的复位键' : '卡住了？转向后按 W 撑杖，或按 R 复位', 3);
       } else {
         this.stuckT = 0;
       }
@@ -927,7 +945,7 @@ export class Racer {
       a = b;
       k = 0;
     }
-    const prevVy = this.vel.y;
+    const { x: prevVx, y: prevVy, z: prevVz } = this.vel;
     const wasGrounded = this.grounded;
     const wasState = this.state;
     this.pos.set(lerp(a.x, b.x, k), lerp(a.y, b.y, k), lerp(a.z, b.z, k));
@@ -968,10 +986,15 @@ export class Racer {
     const h = course.height(this.pos.x, this.pos.z);
     if (s.grounded || this.pos.y < h) this.pos.y = h;
     if (s.grounded) course.normal(this.pos.x, this.pos.z, this.normal);
-    if (s.grounded && !wasGrounded && prevVy < -4 && wasState !== 'ready' && game.nearCamera(this.pos, 150)) {
-      const impact = -prevVy;
-      game.fx.snowBurst(this.pos, Math.min(10, 3 + impact * 0.4), Math.min(9, impact * 0.5));
-      game.sfxAt('thud', this.pos, Math.min(1, impact / 22));
+    if (s.grounded && !wasGrounded && wasState !== 'ready') {
+      const n = this.normal;
+      const impact = -(prevVx * n.x + prevVy * n.y + prevVz * n.z);
+      if (wasState === 'ski' && s.state === 'ski' && (impact > 3 || prevVy < -4)) {
+        this.showLanding(landingLoad(impact));
+      } else if (impact > 3 && game.nearCamera(this.pos, 150)) {
+        game.fx.snowBurst(this.pos, Math.min(10, 3 + impact * 0.4), Math.min(9, impact * 0.5));
+        game.sfxAt('thud', this.pos, Math.min(1, impact / 22));
+      }
     }
     this.grounded = s.grounded;
     this.d = -this.pos.z;
@@ -1063,8 +1086,10 @@ export class Racer {
       hasProp: !!(this.weapon && WEAPONS[this.weapon].prop),
       boost: this.boostT > 0 || this.turboT > 0 || this.nitroT > 0,
       grab: this.grabbing && !tumbling,
+      landing: this.grounded && !tumbling ? this.landingPress : 0,
       ride,
     });
+    this.landingPress *= Math.exp(-7.5 * dt);
     this.skier.shield.visible = this.shieldT > 0;
     if (this.shieldT > 0) this.skier.shield.material.opacity = this.shieldT < 1 ? 0.12 + 0.2 * Math.abs(Math.sin(this.t * 14)) : 0.28;
     this.skier.ice.visible = this.frozenT > 0;

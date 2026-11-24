@@ -44,8 +44,11 @@ export class Quality {
     const q = this.spec;
     const g = this.game;
     const r = g.renderer;
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.ratio));
-    r.setSize(window.innerWidth, window.innerHeight, false);
+    if (g.mini) g.mini.display.sceneRatio = q.ratio;
+    else {
+      r.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.ratio));
+      r.setSize(window.innerWidth, window.innerHeight, false);
+    }
     const sh = g.sun.shadow;
     if (q.shadow && sh.mapSize.x !== q.shadow) {
       sh.mapSize.set(q.shadow, q.shadow);
