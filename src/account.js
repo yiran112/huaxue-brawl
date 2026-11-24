@@ -94,6 +94,10 @@ export class Account {
     this.gate = true;
     this.pane = 'guest';
     this.busy = false;
+    this.bindView();
+  }
+
+  bindView() {
     this.box = document.getElementById('accountBox');
     document.getElementById('account').addEventListener('click', (e) => this.onClick(e));
     document.getElementById('profileWrap').addEventListener('click', (e) => {
@@ -273,7 +277,7 @@ export class Account {
   async onGuest() {
     if (this.busy) return;
     this.busy = true;
-    this.box.classList.add('busy');
+    this.showBusy(true);
     this.setErr('');
     try {
       const data = await api('/api/guest', { method: 'POST', body: { profile: this.game.profile.data, ops: this.ops.slice(0, SEND_MAX) } });
@@ -283,8 +287,12 @@ export class Account {
       this.setErr(e.message);
     } finally {
       this.busy = false;
-      this.box.classList.remove('busy');
+      this.showBusy(false);
     }
+  }
+
+  showBusy(on) {
+    this.box.classList.toggle('busy', on);
   }
 
   async onCreate() {

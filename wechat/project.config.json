@@ -1,0 +1,10 @@
+{
+  "appid": "wx05bfc58f7bd2e9a5",
+  "projectname": "雪山大乱斗",
+  "compileType": "game",
+  "setting": {
+    "es6": false,
+    "urlCheck": true,
+    "minified": true
+  }
+}

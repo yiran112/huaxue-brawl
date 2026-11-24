@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clamp, lerp, smooth, mulberry32, makeNoise, pickWeighted } from './util.js';
 import { mesh } from './skier.js';
-import { buildLandmarks, buildPads } from './landmarks.js';
+import { buildLandmarks, buildPads, buildRouteSigns } from './landmarks.js';
 
 const STEP = 2;
 const D0 = -140;
@@ -71,14 +71,54 @@ function paint(geo, color) {
   return geo;
 }
 
-// low = 远处用的低模：棱数更少，其余外形不变
+// 近处的松枝用不规则的檐口和弯曲轮廓，积雪直接绘在枝冠网格上。
+function snowyBough(radius, height, y, tier, green, snow) {
+  const sides = 7;
+  const rings = [[0, 0.94, 0], [0.42, 0.68, 0], [0.49, 0.58, 1], [0.76, 0.29, 1]];
+  const snowShade = snow.clone().multiply(new THREE.Color(0xacc7de));
+  const shade = green.clone().multiplyScalar(0.66);
+  const color = new THREE.Color();
+  const pos = [], colors = [], idx = [];
+  for (const [h, r, covered] of rings) {
+    for (let i = 0; i < sides; i++) {
+      const angle = i / sides * TAU + tier * 0.53;
+      const shape = Math.sin(i * 3.6 + tier * 1.7);
+      const skirt = radius * r * (1 + shape * 0.062);
+      const dip = shape * (1 - h) * height * 0.07;
+      pos.push(Math.cos(angle) * skirt, y + height * h + dip, Math.sin(angle) * skirt);
+      if (covered) color.copy(snowShade).lerp(snow, clamp(h + shape * 0.18, 0, 1));
+      else color.copy(shade).lerp(green, clamp(0.38 + h + shape * 0.26, 0, 1));
+      colors.push(color.r, color.g, color.b);
+    }
+  }
+  const top = rings.length * sides;
+  const bottom = top + 1;
+  pos.push(0, y + height + 0.06, 0, 0, y + height * 0.08, 0);
+  colors.push(snow.r, snow.g, snow.b, shade.r, shade.g, shade.b);
+  for (let i = 0; i < sides; i++) {
+    const next = (i + 1) % sides;
+    idx.push(bottom, i, next, top - sides + i, top, top - sides + next);
+    for (let j = 0; j < rings.length - 1; j++) {
+      const a = j * sides + i;
+      const b = j * sides + next;
+      idx.push(a, a + sides, b, b, a + sides, b + sides);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// 远处保持原来的轻量剪影，近处复用同一套枝冠实例。
 function makeTreeGeo(theme, tall, low = false) {
   const trunkC = new THREE.Color(theme.trunk);
   const g1 = new THREE.Color(theme.tree);
   const g2 = new THREE.Color(theme.tree2);
   const snow = new THREE.Color(theme.snow);
   const parts = [];
-  const seg = low ? 5 : 7;
   const trunkH = tall ? 7 : 3.2;
   // 树干从地下 TREE_SINK 一直到 trunkH；底部加粗一点，让地面处的粗细和原来一样（0.36）。两头都埋着，不用封口
   const full = trunkH + TREE_SINK;
@@ -92,12 +132,17 @@ function makeTreeGeo(theme, tall, low = false) {
     const r = (tall ? 2.2 : 2.7) - k * 0.55;
     const h = 3.1;
     const y = baseY + k * 1.9;
-    const cone = new THREE.ConeGeometry(r, h, seg);
+    const green = k % 2 ? g2 : g1;
+    if (!low) {
+      parts.push(snowyBough(r, h, y, k, green, snow));
+      continue;
+    }
+    const cone = new THREE.ConeGeometry(r, h, 5);
     cone.rotateY(k * 0.5);
     cone.translate(0, y + h / 2, 0);
-    parts.push(paint(cone, k % 2 ? g2 : g1));
+    parts.push(paint(cone, green));
     const hs = h * 0.6;
-    const sc = new THREE.ConeGeometry(r * 0.7, hs, seg, 1, low);
+    const sc = new THREE.ConeGeometry(r * 0.7, hs, 5, 1, true);
     sc.rotateY(k * 0.5);
     sc.translate(0, y + h - hs / 2 + 0.06, 0);
     parts.push(paint(sc, snow));
@@ -125,12 +170,17 @@ function makeRockGeo(rng, theme) {
   const rock = new THREE.Color(theme.rock);
   const rock2 = new THREE.Color(theme.rock2);
   const snow = new THREE.Color(theme.snow);
+  const snowShade = snow.clone().multiply(new THREE.Color(0xc5d8e7));
   const col = new Float32Array(pos.count * 3);
   const tmp = new THREE.Color();
   for (let i = 0; i < pos.count; i += 3) {
     const ny = nor.getY(i);
-    if (ny > 0.55) tmp.copy(snow);
-    else tmp.copy(rock).lerp(rock2, rng() * 0.9);
+    const grain = ny > 0.55 ? 0.5 : rng();
+    const y = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
+    const strata = Math.sin(y * 22 + pos.getX(i) * 3) * 0.5 + 0.5;
+    tmp.copy(rock).lerp(rock2, 0.16 + 0.53 * grain + 0.26 * strata);
+    if (ny > 0.55) tmp.copy(snowShade).lerp(snow, smooth(0.55, 0.94, ny));
+    else tmp.lerp(snowShade, smooth(0.38, 0.55, ny) * smooth(-0.03, 0.35, y) * 0.64);
     for (let k = 0; k < 3; k++) {
       col[(i + k) * 3] = tmp.r;
       col[(i + k) * 3 + 1] = tmp.g;
@@ -529,6 +579,18 @@ export class Course {
   // 赛道在 d 处的朝向（绕 y 轴）
   headingAt(d) {
     return Math.atan2(-(this.cx(d + 3) - this.cx(d - 3)) / 6, 1);
+  }
+
+  routeX(d, branch) {
+    if (!branch) return this.cx(d);
+    const { pts, idx, dA, dB } = branch;
+    if (d <= dA) return pts[0].x;
+    if (d >= dB) return lerp(pts[pts.length - 1].x, this.cx(d), smooth(dB, dB + 36, d));
+    let next = Math.max(1, idx[Math.floor(d - dA)]);
+    while (next < pts.length - 1 && pts[next].d < d) next++;
+    const a = pts[next - 1];
+    const b = pts[next];
+    return lerp(a.x, b.x, clamp((d - a.d) / (b.d - a.d), 0, 1));
   }
 
   // ---------- 地标 ----------
@@ -935,6 +997,7 @@ export class Course {
     this.buildScatter();
     buildLandmarks(this);
     buildPads(this);
+    buildRouteSigns(this);
     this.buildPeaks();
     // 起点 / 终点拱门的柱子也要有碰撞，不然人能直接穿过去
     for (const [d, R] of [[0, ARCH_START_R], [this.L, ARCH_FINISH_R]]) {
@@ -1019,7 +1082,8 @@ export class Course {
     const pos = new Float32Array(rows * cols * 3);
     const us = new Float32Array(rows * cols);
     const tint = new Uint8Array(rows * cols);
-    const practiceUV = this.def?.practice ? new Float32Array(rows * cols * 4) : null;
+    const practice = this.def?.practice;
+    const snowSurface = new Float32Array(rows * cols * 4);
     let k = 0;
     for (let i = 0; i < rows; i++) {
       const d = rowD[i];
@@ -1047,13 +1111,17 @@ export class Course {
         pos[k * 3 + 2] = z;
         us[k] = this.offTrack(x, d);
         tint[k] = this.tintAt(x, d);
-        if (practiceUV) {
+        snowSurface[k * 4] = x - c;
+        snowSurface[k * 4 + 1] = d;
+        if (practice) {
           const powder = this.practicePowder(x, d);
           const coverage = smooth(4, 27, d) * (1 - smooth(1, 9, this._um));
-          practiceUV[k * 4] = x - c;
-          practiceUV[k * 4 + 1] = d;
-          practiceUV[k * 4 + 2] = (1 - powder) * coverage;
-          practiceUV[k * 4 + 3] = powder * coverage;
+          snowSurface[k * 4 + 2] = (1 - powder) * coverage;
+          snowSurface[k * 4 + 3] = powder * coverage;
+        } else if (!tint[k]) {
+          const u = us[k];
+          snowSurface[k * 4 + 2] = (1 - smooth(-8, 0, this._um)) * 0.28;
+          snowSurface[k * 4 + 3] = smooth(-4, 4, u) * (1 - smooth(10, 37, u));
         }
         k++;
       }
@@ -1090,6 +1158,7 @@ export class Course {
     const lakeCol = new THREE.Color(0x6fc8ff).multiply(snow);
     const lakeCol2 = new THREE.Color(0xc8f0ff).multiply(snow);
     const powderCol = new THREE.Color(0xe4ecff);
+    const bankShade = snow.clone().multiply(new THREE.Color(0xb1cde7));
     for (let i = 0; i < rows * cols; i++) {
       const x = pos[i * 3];
       const z = pos[i * 3 + 2];
@@ -1107,11 +1176,15 @@ export class Course {
       else if (tc === 5) tmp.lerp(rollCol, 0.5);
       else if (tc === 6) tmp.copy(lakeCol).lerp(lakeCol2, smooth(0.35, 0.75, this.noise(x * 0.07 + 3, z * 0.25)));
       else if (tc === 7) tmp.lerp(powderCol, 0.5).multiplyScalar(0.86 + 0.16 * this.noise(x * 0.45 + 9, z * 0.45));
-      if (practiceUV) {
-        const drift = practiceUV[i * 4 + 3];
+      if (practice) {
+        const drift = snowSurface[i * 4 + 3];
         const wind = this.noise(x * 0.26, z * 0.14);
         tmp.lerp(powderCol, drift * (0.2 + wind * 0.65));
-        tmp.multiplyScalar(1 - practiceUV[i * 4 + 2] * 0.09 - drift * wind * 0.045);
+        tmp.multiplyScalar(1 - snowSurface[i * 4 + 2] * 0.09 - drift * wind * 0.045);
+      } else if (!tc) {
+        const wind = this.noise(x * 0.18 + 8, z * 0.09);
+        const bank = snowSurface[i * 4 + 3] * (1 - rockT);
+        tmp.lerp(bankShade, bank * (0.19 + wind * 0.2));
       }
       const shade = 0.95 + 0.05 * this.noise(x * 0.2, z * 0.2);
       col[i * 3] = tmp.r * shade;
@@ -1120,24 +1193,27 @@ export class Course {
     }
     const colAttr = new THREE.BufferAttribute(col, 3);
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-    const practiceAttr = practiceUV && new THREE.BufferAttribute(practiceUV, 4);
-    if (practiceAttr) {
-      // 沟纹跟着雪道中线走，远处随像素覆盖面积淡出，避免高速时闪烁。
-      mat.onBeforeCompile = (shader) => {
-        shader.vertexShader = 'attribute vec4 practiceSnow; varying vec4 vPracticeSnow;\n' +
-          shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPracticeSnow = practiceSnow;');
-        shader.fragmentShader = 'varying vec4 vPracticeSnow;\n' +
-          shader.fragmentShader.replace('#include <color_fragment>', `
-            #include <color_fragment>
-            float grooves = vPracticeSnow.x / 0.34;
-            float filterWidth = fwidth(grooves);
-            float rib = cos(grooves * 6.2831853) * (1.0 - smoothstep(0.17, 0.53, filterWidth));
-            float lanes = cos(vPracticeSnow.x * 1.6) * 0.028;
-            float ripples = sin(vPracticeSnow.x * 1.1 + sin(vPracticeSnow.y * 0.20) * 1.9) * 0.032;
-            diffuseColor.rgb *= 1.0 + vPracticeSnow.z * (rib * 0.115 + lanes) + vPracticeSnow.w * ripples;
-          `);
-      };
-    }
+    const snowAttr = new THREE.BufferAttribute(snowSurface, 4);
+    // 沟纹跟着雪道中线走，远处随像素覆盖面积淡出，避免高速时闪烁。
+    mat.extensions = { derivatives: true };
+    mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = 'attribute vec4 snowSurface; varying vec4 vSnowSurface;\n' +
+        shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvSnowSurface = snowSurface;');
+      shader.fragmentShader = 'varying vec4 vSnowSurface;\n' +
+        shader.fragmentShader.replace('#include <color_fragment>', `
+          #include <color_fragment>
+          float grooves = vSnowSurface.x / 0.34;
+          float lanes = cos(vSnowSurface.x * 1.6) * 0.028;
+          float drift = vSnowSurface.x * 1.1 + sin(vSnowSurface.y * 0.20) * 1.9;
+          float rib = 0.0;
+          float ripples = 0.0;
+          #if __VERSION__ >= 300 || defined(GL_OES_standard_derivatives)
+            rib = cos(grooves * 6.2831853) * (1.0 - smoothstep(0.17, 0.53, fwidth(grooves)));
+            ripples = sin(drift) * (1.0 - smoothstep(0.9, 2.6, fwidth(drift))) * 0.042;
+          #endif
+          diffuseColor.rgb *= 1.0 + vSnowSurface.z * (rib * 0.115 + lanes) + vSnowSurface.w * ripples;
+        `);
+    };
     // 沿下坡方向切成若干段：各段共用同一份顶点数据，只是索引不同，各自带包围球，镜头外（主要是身后）的段不画
     this.terrainChunks = [];
     const strip = (cols - 1) * 6;
@@ -1149,7 +1225,7 @@ export class Course {
       geo.setAttribute('position', posAttr);
       geo.setAttribute('normal', nor);
       geo.setAttribute('color', colAttr);
-      if (practiceAttr) geo.setAttribute('practiceSnow', practiceAttr);
+      geo.setAttribute('snowSurface', snowAttr);
       geo.setIndex(new THREE.BufferAttribute(idx.slice(r0 * strip, r1 * strip), 1));
       box.makeEmpty();
       for (let i = r0 * cols; i < (r1 + 1) * cols; i++) box.expandByPoint(p.fromArray(pos, i * 3));

@@ -14,7 +14,7 @@ import { hudMethods } from './ui/hud.js';
 import { resultsMethods } from './ui/results.js';
 import { FEAT, trackFeats, trackArt } from './ui/trackArt.js';
 import { tuneHtml } from './ui/tune.js';
-import { $, hex, esc, TIER_ICONS, SHOW, cosmeticOf } from './ui/common.js';
+import { $, hex, esc, TIER_ICONS, SHOW, cosmeticOf, THEME_ICON, MODE_STYLE } from './ui/common.js';
 export { esc } from './ui/common.js';
 
 const TABS = ['race', 'growth', 'garage', 'shop', 'look', 'set'];
@@ -23,6 +23,9 @@ const PAGE_TITLE = { growth: '成长', garage: '车库', shop: '商城', look: '
 const RACE_TITLE = { track: '赛道大厅', hall: '开房间', room: '创建房间', rank: '排位赛' };
 const DIFF_NAMES = ['简单', '普通', '困难'];
 const MEDAL = ['', '🥉', '🥈', '🥇'];
+const BACK_BUTTONS = '[data-act="back"], [data-act="achClose"], [data-acc="close"], .qpX, #btnLobby, #btnQuit, #btnSkip, #skipDeparture';
+const CONFIRM_BUTTONS = '[data-acc], .confirm, .btn.go, .rbtn.main, .hready, [data-act="practice"], [data-act="boxWear"], [data-act="boxFxOk"]';
+const SELECT_BUTTONS = '[data-k], [data-tab], [data-sub], [data-pane], [data-ban], .tcard, .mcard, .ropt, .grank, .scard';
 
 // 设置页左边的分类：[key, 图标, 名字, 英文小字]
 const SET_CATS = [
@@ -54,19 +57,6 @@ const GUIDE_HTML = `<p class="note">撞上蓝紫色泡泡获得随机道具，�
 <p class="note"><b>地形</b>：淡蓝色的<b>冰面</b>阻力小、速度快，但抓地差、容易甩尾；白色松软的<b>深雪</b>会拖慢速度（单板和充气圈受影响小，雪橇最怕）。地上闪着箭头的<b>加速带</b>冲过去直接提速。<br>
   <b>机关</b>：雪地摩托会横穿雪道、滚石从山坡上砸下来，路边有警示牌；雪崩赛道上，领先者经过触发点后雪崩会从身后追来，被追上就会被卷飞。</p>
 <p class="note"><b>装备</b>：分 C 普通、B 优秀、A 稀有、S 传说四档，档位越高属性越强，改装也越贵。双板均衡，单板漂移和空翻强，雪橇极速高但笨重，雪圈起步快、几乎撞不翻；B、A、S 三档里还有雪地单车、冲锋艇、雪地摩托、飞碟这些造型独特的载具，各有各的长短板。前期装备随等级在「车库」里解锁购买；更高级的稀有、传说装备在「商城」里用雪花币直接买，不看等级。改装都在车库里做。</p>`;
-const THEME_ICON = { day: '☀️', sunset: '🌄', storm: '🌨️', night: '🌌' };
-
-// 模式选择大卡片：配色、英文小字、是否推荐
-const MODE_STYLE = {
-  race: { en: 'ITEM RACE', c: ['#ffab3d', '#ef5f17'], rec: true },
-  speed: { en: 'RACING', c: ['#3f9bff', '#2152d4'], rec: true },
-  elim: { en: 'ELIMINATION', c: ['#ff5c78', '#c41f45'] },
-  team: { en: 'TEAM', c: ['#2fcfa8', '#11876f'] },
-  brawl: { en: 'BRAWL', c: ['#a56bff', '#6527d6'] },
-  trick: { en: 'TRICK', c: ['#ff74c8', '#cf2f8d'] },
-  tt: { en: 'TIME TRIAL', c: ['#4fd0f0', '#2775b8'] },
-};
-
 // 大厅每一页分成左右两栏（side：'l' / 'r'），各自带标题、各自滚动
 // 面板没占满屏幕时返回的“整屏”
 const FULL_FRAME = { cx: 0.5, cy: 0.5, w: 1, h: 1 };
@@ -128,6 +118,7 @@ export class UI {
     this.rankMode = 'solo';
     this.modeSel = null; // 模式选择浮层：{ go } go = 选完直接开赛
     this.quest = new Quest(this); // 任务面板：首页「每日任务」点开的那一层
+    document.addEventListener('click', (e) => this.playClick(e), true);
     // Esc：和左上角的返回一样一层层往回退；已经在首页时取消匹配
     window.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
@@ -158,6 +149,7 @@ export class UI {
     $('btnNext').addEventListener('click', () => game.nextRace());
     $('btnPracticeSwap').addEventListener('click', () => game.startPractice(game.session.gear === 'ski' ? 'learner' : 'ski'));
     $('btnResume').addEventListener('click', () => game.setPaused(false));
+    $('skipDeparture').addEventListener('click', () => game.finishDeparture());
     $('btnRestart').addEventListener('click', () => game.restartRace());
     $('btnQuit').addEventListener('click', () => game.quitRace());
     // 每日任务卡片上的刷新倒计时
@@ -169,6 +161,23 @@ export class UI {
     }, 20000);
     $('btnStartNow').addEventListener('click', () => game.startMatchNow());
     $('btnInvite').addEventListener('click', () => this.copyInvite());
+  }
+
+  playClick(e) {
+    const button = e.target?.closest?.('button, [role="button"]');
+    if (!button || button.matches(':disabled, [aria-disabled="true"], [data-t], [data-act="mute"]')) return;
+    const sfx = this.game.sfx;
+    sfx.init();
+    if (this.game.state === 'menu') sfx.menuStart();
+    let sound = 'click';
+    if (button.matches('[data-act="locked"], .poor, .full, [data-act="ranked"].lock')) sound = 'blocked';
+    else if (button.matches(BACK_BUTTONS) || (this.queueing && button.matches('.hready, [data-act="rankGo"]'))) sound = 'back';
+    else if (button.matches(CONFIRM_BUTTONS)) sound = 'confirm';
+    else if (button.matches(SELECT_BUTTONS)) sound = 'select';
+    // 拖拽货架会在后续事件处理里取消这次点击。
+    setTimeout(() => {
+      if (!e.defaultPrevented) sfx.uiSound(sound);
+    }, 0);
   }
 
   // ---------- 菜单 ----------
@@ -1127,6 +1136,7 @@ export class UI {
     }
     if (act === 'mute') {
       g.sfx.setMuted(b.dataset.v === '1');
+      g.sfx.uiSound('select');
       this.renderTab('set');
       return;
     }

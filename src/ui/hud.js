@@ -6,10 +6,14 @@ import { TEAM_COLORS } from '../modes.js';
 import { CHAIN_T, MULT_MAX } from '../chain.js';
 import { fmtTime } from '../util.js';
 import { $, hex, esc } from './common.js';
+import { rankRows } from './touchKit.js';
 
 export const hudMethods = {
   showHud(b) {
     $('hud').classList.toggle('hidden', !b);
+  },
+  showDeparture(b) {
+    $('skipDeparture').classList.toggle('hidden', !b);
   },
   // online：联机比赛中，只是打开菜单，比赛不会停，也不能重开
   // note：联机比赛的说明（比赛不停、现在退出会怎样）
@@ -261,14 +265,17 @@ export const hudMethods = {
     if (this.rankT <= 0) {
       this.rankT = 0.25;
       const mode = g.mode;
-      $('rank').innerHTML = g.order
-        .map((r, i) => {
+      const html = mode.hud();
+      // 手机上右边让给按键：名次表只列第一名和自己附近几个人
+      const rows = g.touch && g.touch.on ? rankRows(g.order, html ? 4 : 5) : g.order.map((r, i) => ({ r, i }));
+      $('rank').innerHTML = rows
+        .map(({ r, i }, k) => {
           const tag = mode.rankTag(r) ?? (r.finished ? '🏁' : r.weapon ? WEAPONS[r.weapon].icon : '');
           const team = r.team >= 0 ? ` style="border-left:4px solid ${TEAM_COLORS[r.team]}"` : '';
-          return `<div class="row ${r.isPlayer ? 'me' : ''} ${r.finished ? 'done' : ''} ${r.out ? 'out' : ''}"${team}><span class="n">${i + 1}</span><span class="nm">${esc(r.name)}</span><span>${tag}</span></div>`;
+          const gap = k > 0 && i !== rows[k - 1].i + 1 ? ' gap' : '';
+          return `<div class="row ${r.isPlayer ? 'me' : ''} ${r.finished ? 'done' : ''} ${r.out ? 'out' : ''}${gap}"${team}><span class="n">${i + 1}</span><span class="nm">${esc(r.name)}</span><span>${tag}</span></div>`;
         })
         .join('');
-      const html = mode.hud();
       if (html !== this.lastModeHtml) {
         this.lastModeHtml = html;
         $('modeBox').innerHTML = html;
