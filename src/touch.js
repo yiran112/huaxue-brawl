@@ -1,9 +1,11 @@
 // 手机触屏：比赛中屏幕上的虚拟按键。最近一次操作是触屏时才显示（按了键盘就收起来）。
 // 触屏时自动俯冲，不用一直按着；倒计时最后点一下任意键就算起步。
-// 按键的图标和位置见 ui/touchKit.js（微信小游戏也用同一套）；道具键上直接显示手里的道具，氮气键上带充能圈
+// 按键的图标和位置见 ui/touchKit.js（微信小游戏也用同一套）；道具键上直接显示手里的道具，氮气键上带充能圈。
+// 右上角的小地图（ui/minimap.js）也画在这一层上，代替电脑上左边那根进度条
 import { EMOTES } from './emotes.js';
 import { WEAPONS } from './config.js';
 import { iconSvg, LABELS, touchLayout } from './ui/touchKit.js';
+import { buildMinimap, drawMinimap } from './ui/minimap.js';
 
 const KEYS = ['left', 'right', 'jump', 'drift', 'brake', 'fire', 'nitro', 'reset', 'pause', 'emo', ...EMOTES.map((_, i) => `e${i}`)];
 const NAMES = { left: '左转', right: '右转', reset: '复位', pause: '暂停', emo: '表情' };
@@ -37,6 +39,11 @@ export class Touch {
     const nitro = this.btn.nitro;
     this.nitroEl = { rf: nitro.querySelector('.rf'), badge: nitro.querySelector('.badge') };
     this.shown = {};
+    this.mapEl = document.createElement('canvas');
+    this.mapEl.className = 'mm';
+    el.appendChild(this.mapEl);
+    this.mapCtx = this.mapEl.getContext('2d');
+    this.mm = null;
     document.getElementById('hud').after(el);
     el.addEventListener('pointerdown', (e) => this.down(e));
     for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(t, (e) => this.up(e));
@@ -102,18 +109,34 @@ export class Touch {
       b.style.height = p.h + 'px';
       b.style.setProperty('--d', Math.min(p.w, p.h) + 'px');
     }
-    // 速度表挪到转向键右边，名次表放到右上角按键下面
+    // 速度表挪到转向键右边
     const hud = document.getElementById('hud').style;
     hud.setProperty('--spdL', L.speed.x + 'px');
     hud.setProperty('--spdB', H - L.speed.y + 'px');
-    hud.setProperty('--sideT', L.sysBottom + 10 + 'px');
-    hud.setProperty('--sideR', Math.max(W * 0.02, safe.r + 6) + 'px');
+    const m = (this.mapBox = L.map);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    Object.assign(this.mapEl.style, { left: m.x + 'px', top: m.y + 'px', width: m.w + 'px', height: m.h + 'px' });
+    this.mapEl.width = Math.round(m.w * dpr);
+    this.mapEl.height = Math.round(m.h * dpr);
+    this.mapCtx.setTransform(this.mapEl.width / m.w, 0, 0, this.mapEl.height / m.h, 0, 0);
+    this.mm = null;
+  }
+
+  // 小地图：换了赛道或者地图框大小变了才重算走线，人的位置每帧画
+  drawMap() {
+    const g = this.game;
+    const m = this.mapBox;
+    if (!g.course || !m) return;
+    if (!this.mm || this.mm.course !== g.course) this.mm = buildMinimap(g.course, m.w, m.h);
+    this.mapCtx.clearRect(0, 0, m.w, m.h);
+    drawMinimap(this.mapCtx, this.mm, g);
   }
 
   // 每帧：道具键显示手里的道具，氮气键显示存了几瓶、下一瓶攒到多少
   update() {
     if (!this.on) return;
     this.layout();
+    this.drawMap();
     const p = this.game.player;
     const s = this.shown;
     const live = !!p && !p.out && !p.finished;

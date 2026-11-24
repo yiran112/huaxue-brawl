@@ -1,12 +1,11 @@
-import { THEMES, WEAPONS } from '../src/config.js';
+import { WEAPONS } from '../src/config.js';
 import { CHAIN_T, MULT_MAX } from '../src/chain.js';
 import { EMOTES } from '../src/emotes.js';
 import { TEAM_COLORS } from '../src/modes.js';
-import { RANK_MAP } from '../src/rank.js';
 import { PRACTICE_SECONDS } from '../src/tracks.js';
 import { clamp, fmtTime } from '../src/util.js';
-import { hex } from '../src/ui/common.js';
 import { drawIcon, LABELS, rankRows, touchLayout } from '../src/ui/touchKit.js';
+import { buildMinimap, drawMinimap } from '../src/ui/minimap.js';
 import { card, GOLD, NAVY, PALE, scrim } from './paint.js';
 import { plain } from './ui.js';
 
@@ -187,43 +186,16 @@ function racePlace(ui, p, zoom) {
   const t = practice ? Math.max(0, PRACTICE_SECONDS - g.raceTime) : p.finished ? p.finishTime : g.raceTime;
   const yy = multiple ? y + 133 * zoom : y + 38 * zoom;
   ui.text(fmtTime(t), x + 4 * zoom, yy, { size: 26 * zoom, bold: true, outline: true });
-  const where = g.trackDef?.name || THEMES[g.themeKey].name;
-  const ranked = RANK_MAP[g.session.rank];
-  const mode = g.mode.def;
-  let text = ranked ? `${ranked.icon} ${ranked.name} · ${where}` : `${mode.icon} ${mode.name} · ${where}`;
-  if (practice) text = `雪松村 · ${g.session.gear === 'ski' ? '双板' : '单板'}`;
-  else if (!g.net.active && g.rules.rounds > 1) text += ` · 第 ${g.round} / ${g.rules.rounds} 轮`;
-  ui.text(text, x + 4 * zoom, yy + 28 * zoom, { size: 16 * zoom, bold: true, outline: true, max: ui.w * .34 });
+  // 计时下面直接接名次表（手机上不显示玩法和赛道名那一行）
+  return { x, y: yy + 21 * zoom };
 }
 
-function trackProgress(ui, p, zoom) {
-  const g = ui.game;
-  const x = Math.max(ui.l, 34 * zoom);
-  const y = ui.t + 184 * zoom;
-  const h = Math.max(30, ui.h * .56 - y);
-  const w = 8 * zoom;
-  ui.panel(x, y, w, h, DARK, 4 * zoom, null);
-  ui.text('起', x + w / 2, y - 15 * zoom, { center: true, bold: true, size: 14 * zoom, outline: true });
-  ui.text('🏁', x + w / 2, y + h + 15 * zoom, { center: true, size: 16 * zoom });
-  const racers = g.racers.filter((r) => r !== p).concat(p);
-  for (const racer of racers) {
-    const d = (racer === p ? 22 : 16) * zoom;
-    const yy = y + clamp(racer.d / g.course.L, 0, 1) * h;
-    ui.ctx.globalAlpha = racer.out ? .25 : 1;
-    const border = racer === p ? '#fff' : TEAM_COLORS[racer.team] || NAVY;
-    ui.panel(x + (w - d) / 2, yy - d / 2, d, d, hex(racer.look.jacket), d / 2, border);
-    ui.ctx.globalAlpha = 1;
-  }
-}
-
-// 名次表在右上角按键下面，只列第一名和自己附近几个人，把右手的按键让出来
-function ranks(ui, zoom, L) {
+// 名次表在左上角计时下面，只列第一名和自己附近几个人
+function ranks(ui, zoom, { x, y }) {
   const g = ui.game;
   const w = 200 * zoom;
-  const x = L.edgeR - w;
   const row = 26 * zoom;
   const mode = plain(g.mode.hud());
-  let y = L.sysBottom + 10;
   let last = -1;
   for (const { r, i } of rankRows(g.order, mode ? 4 : 5)) {
     if (last >= 0 && i !== last + 1) y += 7 * zoom;
@@ -261,7 +233,7 @@ function chainHud(ui, p, zoom) {
   const g = ui.game;
   const chain = p.chain;
   const x = Math.max(ui.l, ui.w * .03);
-  const y = ui.h * .60 - 54 * zoom;
+  const y = ui.h * .67 - 82 * zoom;
   const w = Math.min(398 * zoom, ui.w * .34), h = 82 * zoom;
   const air = !p.grounded && p.state === 'ski';
   const airText = air && (Math.abs(p.flip) > .3 || Math.abs(p.spinA) > .3 || p.grabT > .05)
@@ -315,8 +287,8 @@ function messages(ui, zoom) {
 }
 
 function impact(ui, zoom) {
-  const x = 56 * zoom, y = Math.max(ui.t + 105 * zoom, 176 * zoom);
-  const w = Math.min(400 * zoom, ui.w * .32), h = Math.min(220 * zoom, ui.h * .34);
+  const x = Math.max(ui.l, 28 * zoom) + 242 * zoom, y = Math.max(ui.t + 40 * zoom, 96 * zoom);
+  const w = Math.min(400, ui.w * .32) * zoom, h = Math.min(220, ui.h * .34) * zoom;
   ui.impactBox = { x, y, w, h };
   ui.rounded(x, y, w, h, 10 * zoom);
   ui.ctx.lineWidth = 3;
@@ -325,6 +297,15 @@ function impact(ui, zoom) {
   ui.panel(x + 7, y + h - 27 * zoom, w - 14, 19 * zoom, 'rgba(11,21,48,.78)', 7 * zoom, null);
   ui.text(`现场  ${ui.impact.frozen ? '冻住' : '命中'} ${ui.impact.name}  ${ui.impact.cause}`, x + 13, y + h - 17 * zoom,
     { size: 14 * zoom, color: GOLD, bold: true, max: w - 24 });
+}
+
+// 右上角按键下面的小地图（走线每条赛道算一次）
+function minimap(ui, L) {
+  const g = ui.game;
+  const { x, y, w, h } = L.map;
+  const mm = ui.minimapCache;
+  if (!mm || mm.course !== g.course || mm.w !== w || mm.h !== h) ui.minimapCache = buildMinimap(g.course, w, h);
+  drawMinimap(ui.ctx, ui.minimapCache, g, x, y);
 }
 
 export function drawRace(ui) {
@@ -347,10 +328,10 @@ export function drawRace(ui) {
   }
   const L = controlLayout(ui);
   if (ui.impact && !ui.pause) impact(ui, zoom);
-  racePlace(ui, p, zoom);
+  const under = racePlace(ui, p, zoom);
+  minimap(ui, L);
   if (!practice) {
-    trackProgress(ui, p, zoom);
-    ranks(ui, zoom, L);
+    ranks(ui, zoom, under);
     chainHud(ui, p, zoom);
   }
   speedo(ui, p, zoom, L);

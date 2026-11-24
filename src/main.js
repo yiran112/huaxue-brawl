@@ -234,6 +234,7 @@ export class Game {
     this.sunDir = new THREE.Vector3(0.5, 0.6, 0.3).normalize();
     window.addEventListener('resize', () => {
       resize();
+      this.quality.fit();
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
     });

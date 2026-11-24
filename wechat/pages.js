@@ -350,7 +350,10 @@ export function drawResults(ui) {
   const w = Math.min(1000, ui.r - ui.l - 8);
   const x = (ui.w - w) / 2, y = ui.t + 3, h = ui.b - y;
   card(ui, { x, y, w, h }, 'rgba(11,21,48,.94)', { radius: 22, stroke: '#ffffff48', shadow: 0 });
-  const body = { x: x + 27, y: y + 12, w: w - 57, h: h - 24 };
+  const buttonHeight = 44;
+  const buttonY = ui.b - buttonHeight - 16;
+  const bodyY = y + 12;
+  const body = { x: x + 27, y: bodyY, w: w - 57, h: buttonY - bodyY - 10 };
   const actions = [[r.backLabel || '返回大厅', () => g.toMenu()]];
   if (g.replay.btnShown) actions.push(['精彩回放', () => g.replay.play()]);
   if (r.swapLabel) actions.push([r.swapLabel, () => g.startPractice(g.session.gear === 'ski' ? 'learner' : 'ski')]);
@@ -362,7 +365,7 @@ export function drawResults(ui) {
   const leftW = body.w - (rw ? rw + 18 : 0);
   const rewardH = reward ? 81 + rewardRows(reward).rows.length * 27 + Math.min(3, reward.unlocks?.length || 0) * 20 : 0;
   const leftH = (usePodium ? 252 : 0) + ((r.awards || []).length ? 41 : 0) + rest.length * 34;
-  const content = 152 + Math.max(rewardH, leftH);
+  const content = 120 + Math.max(rewardH, leftH);
   ui.scrollArea('results', body, content, (offset) => {
     const yy = body.y + 16 - offset;
     ui.text(r.title, body.x, yy + 29, { size: 43, color: GOLD, bold: true, italic: true, outline: true, max: body.w });
@@ -383,8 +386,9 @@ export function drawResults(ui) {
       py += 34;
     });
     if (reward) drawRewards(ui, { x: body.x + leftW + 18, y: yy + 94, w: rw }, reward);
-    const btnY = yy + 98 + Math.max(rewardH, leftH);
-    const bw = (body.w - (actions.length - 1) * 10) / actions.length;
-    actions.forEach(([label, run], i) => ui.button(label, body.x + i * (bw + 10), btnY, bw, 44, run, { primary: i === actions.length - 1, size: 18 }));
   });
+  const bw = (body.w - (actions.length - 1) * 10) / actions.length;
+  actions.forEach(([label, run], i) => ui.button(label, body.x + i * (bw + 10), buttonY, bw, buttonHeight, run, {
+    primary: i === actions.length - 1, size: 18,
+  }));
 }

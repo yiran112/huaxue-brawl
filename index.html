@@ -181,17 +181,20 @@
   #touch.emoOpen .k-emo { --c: #ffd23c; background: rgba(255, 210, 60, .35); }
   @keyframes emIn { from { transform: translateX(12px) scale(.6); opacity: 0; } }
   #touch .off { display: none !important; }
-  /* 触屏时 HUD 让开按键：速度表在转向键右边，名次表在右上角按键下面，技巧链抬到转向键上面。
+  /* 触屏时的 HUD：左上角名次、计时，下面紧跟名次表（不显示玩法和赛道名那一行）；右上角按键下面是小地图（touch.js 画，代替左边的进度条）；
+     速度表在转向键右边，技巧链在转向键上面，命中回放挪到名次表右边。
      --spdL 这些是 touch.js 按实际按键位置写的屏幕像素，除以 --hz 抵掉 HUD 的整体缩放 */
   #hud { --hz: 1; }
-  body.touch #side { top: calc(var(--sideT, 64px) / var(--hz)); right: calc(var(--sideR, 14px) / var(--hz)); width: 200px; }
+  body.touch :is(#round, #progress) { display: none; }
+  body.touch #side { left: 30px; right: auto; top: 154px; width: 200px; }
   body.touch #rank { font-size: 17px; }
   body.touch #rank .row { padding-top: 2px; padding-bottom: 2px; margin-bottom: 3px; }
   body.touch #rank .row.gap { margin-top: 10px; }
   body.touch #speed { left: calc(var(--spdL, 260px) / var(--hz)); right: auto; bottom: calc(var(--spdB, 16px) / var(--hz)); text-align: left; line-height: 1; }
-  body.touch #chain, body.touch #trickPop { bottom: 40%; left: 3%; }
-  body.touch #progress { bottom: 44%; }
+  body.touch #chain, body.touch #trickPop { bottom: 33%; left: 3%; }
   body.touch #tip { bottom: 34%; }
+  body.touch #impact { left: 270px; top: 96px; }
+  #touch .mm { position: absolute; pointer-events: none; }
   /* 小屏（手机横屏）：比赛 HUD 整体缩小 */
   @media (max-height: 560px), (max-width: 760px) { #hud { zoom: .62; --hz: .62; } }
   /* ---------- 精彩回放 ---------- */
