@@ -4,7 +4,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clamp, lerp, damp } from './util.js';
 import { SKINS } from './config.js';
-import { GEAR, rarityRank } from './gear.js';
+import { GEAR, GEAR_COLOR, rarityRank } from './gear.js';
 import { GEAR_MODELS, gearKit, bakeGear } from './gearModels.js';
 import { outfitKit, buildHat, buildGoggles, buildBack, buildScarf } from './outfitModels.js';
 
@@ -182,7 +182,7 @@ export class Skier {
     inner.position.y = this.innerY;
     this.vehicle = null;
     // 装备用到的材质，以及要动起来的零件（尾焰、灯圈、羽翼、小旗）
-    const kit = gearKit(lam, L.ski, trim, -this.lift);
+    const kit = gearKit(lam, GEAR_COLOR, trim, -this.lift);
     this.gearFx = kit.fx;
 
     // 滑雪板（单板 / 雪橇 / 充气圈时只留一个空节点占位，动画代码照常转它）
@@ -238,8 +238,7 @@ export class Skier {
     const face = skierFace(L, skin);
     this.ownGeos.push(face.geometry);
     this.head.add(face);
-    // 装扮的造型在 outfitModels.js；合并出来的几何体归这个角色，销毁时一起释放。
-    // 护目镜、背饰、围巾各挂一个自己的组，合并时不会把头和衣服一起合进去
+    // 装扮的造型在 outfitModels.js；合并出来的几何体归这个角色，销毁时一起释放
     const outfit = (this.outfit = outfitKit(lam));
     buildHat(this.head, L, outfit);
     this.eyewear = new THREE.Group();

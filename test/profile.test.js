@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Profile, sanitizeProfile, START_COINS, START_PARTS, xpNeed, ACHIEVEMENTS } from '../src/profile.js';
-import { GEAR, BOX_COST, BOX_REFUND, BOX_POOL, UP_KEYS } from '../src/gear.js';
+import { DEFAULT_HAT } from '../src/config.js';
+import { GEAR, COSMETIC_SLOTS, BOX_COST, BOX_REFUND, BOX_POOL, UP_KEYS } from '../src/gear.js';
 
 // 测试里没有 localStorage，Profile 只在内存里
 const fresh = () => new Profile();
@@ -47,15 +48,15 @@ test('购买：等级不够买不了，钱不够买不了，买了扣钱', () =>
   assert.equal(p.coins, START_COINS);
   const u = GEAR.wood.unlock;
   p.data.coins = 5000;
-  assert.equal(p.buy(u, 'gear:wood'), false);
+  assert.equal(p.buy('gear:wood'), false);
   p.data.xp = xpFor(u.lv);
   p.data.coins = u.cost - 1;
-  assert.equal(p.buy(u, 'gear:wood'), false);
+  assert.equal(p.buy('gear:wood'), false);
   p.data.coins = u.cost + 10;
-  assert.equal(p.buy(u, 'gear:wood'), true);
+  assert.equal(p.buy('gear:wood'), true);
   assert.equal(p.coins, 10);
   assert.equal(p.gearOwned('wood'), true);
-  assert.equal(p.buy(u, 'gear:wood'), false);
+  assert.equal(p.buy('gear:wood'), false);
 });
 
 test('改装：没有的装备不能改，上一个节点改满才解锁，价格按排和稀有度', () => {
@@ -117,10 +118,31 @@ test('补给箱：扣钱，开到重复的折回一部分', () => {
   const a = p.openBox(() => 0);
   assert.equal(a.key, BOX_POOL[0].key);
   assert.equal(a.dup, false);
+  assert.equal(p.cosmeticOwned('goggles', 2), true);
   assert.equal(p.coins, BOX_COST);
   const b = p.openBox(() => 0);
   assert.equal(b.dup, true);
   assert.equal(p.coins, BOX_REFUND);
+});
+
+test('外观：基础造型可用，奖品不会购买或随等级和成就获得，已入库的外观继续可用', () => {
+  const p = fresh();
+  assert.equal(p.hatOwned(DEFAULT_HAT), true);
+  for (const slot of Object.keys(COSMETIC_SLOTS)) assert.equal(p.cosmeticOwned(slot, 0), true);
+  p.data.xp = xpFor(60);
+  p.data.coins = 10000;
+  p.data.ach = Object.fromEntries(ACHIEVEMENTS.map(({ id }) => [id, 1]));
+  for (const { key } of BOX_POOL) {
+    const [slot, id] = key.split(':');
+    assert.equal(slot === 'hat' ? p.hatOwned(+id) : p.cosmeticOwned(slot, +id), false, key);
+    assert.equal(p.buy(key), false, key);
+  }
+  assert.equal(p.coins, 10000);
+  assert.deepEqual(p.data.owned, {});
+  p.loadData(sanitizeProfile({ owned: { 'hat:6': true, 'back:3': true } }));
+  assert.equal(p.hatOwned(6), true);
+  assert.equal(p.cosmeticOwned('back', 3), true);
+  assert.equal(p.boxOwned('back:3'), true);
 });
 
 test('排位：开赛记下待结算，结算或离开时清掉', () => {

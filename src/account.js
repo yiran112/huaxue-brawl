@@ -1,5 +1,6 @@
 // 游客钥匙存在这台浏览器里。没有钥匙就先建一条游客；创建账号是给当前游客补上用户名和密码。
 import { START_COINS, START_PARTS, NAME_RE, isAutoNick, sanitizeProfile } from './profile.js';
+import { setGameHtml } from './ui/web-icons.js';
 
 const TOKEN_KEY = 'huaxue_token';
 
@@ -390,9 +391,9 @@ export class Account {
     document.getElementById('accountTitle').textContent = '存档服务器没连上';
     document.getElementById('accountClose').classList.add('hidden');
     document.getElementById('accountTabs').innerHTML = '';
-    document.getElementById('accountBody').innerHTML =
+    setGameHtml(document.getElementById('accountBody'),
       `<p class="note" style="margin-top:0">${esc(msg || '连不上存档服务器')}。可以先用这台设备上的进度玩，连上之后再保存。</p>` +
-      `<button type="button" class="btn go" data-acc="offline">先在这台设备上玩</button>`;
+      `<button type="button" class="btn go" data-acc="offline">先在这台设备上玩</button>`);
     this.setErr('');
     this.show();
   }
@@ -423,7 +424,7 @@ export class Account {
     document.getElementById('accountTabs').innerHTML = tabs
       .map(([id, name]) => `<button type="button" data-pane="${id}" class="${id === this.pane ? 'on' : ''}">${name}</button>`)
       .join('');
-    document.getElementById('accountBody').innerHTML = this.paneHtml();
+    setGameHtml(document.getElementById('accountBody'), this.paneHtml());
     this.setErr('');
   }
 

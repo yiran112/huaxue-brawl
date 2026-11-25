@@ -1,7 +1,7 @@
 // 玩家存档与成长：等级经验、雪花币、改装币、解锁购买、装备改装、每日任务、成就、生涯数据、结算奖励。
 // 浏览器里留一份缓存；账号登录之后，服务器上的那份为准（见 src/account.js）。
-import { HATS, MODE_KEYS, MODES, POINTS } from './config.js';
-import { GEAR, GEAR_KEYS, RARITY, UPGRADES, UP_KEYS, UP_MAX, UP_COST, HAT_UNLOCK, COSMETIC_SLOTS, BOX_COST, BOX_REFUND, BOX_POOL, rollBox, unlockOf } from './gear.js';
+import { DEFAULT_HAT, MODE_KEYS, MODES, POINTS } from './config.js';
+import { GEAR, GEAR_KEYS, RARITY, UPGRADES, UP_KEYS, UP_MAX, UP_COST, COSMETIC_SLOTS, BOX_COST, BOX_REFUND, BOX_POOL, rollBox, unlockOf } from './gear.js';
 import { CUPS, TRACKS, medalTimes } from './tracks.js';
 import { RANK_LV, RANK_MAP, tierAt, scoreRank, scoreLeave, localDay } from './rank.js';
 import { mulberry32 } from './util.js';
@@ -160,7 +160,7 @@ const defaults = () => ({
   coins: START_COINS,
   parts: START_PARTS,
   title: '',
-  owned: {}, // 买下的东西：'gear:sled'、'hat:6'、'back:3' ……
+  owned: {}, // 买下的装备或抽中的外观，例如 'gear:sled'、'hat:6'、'back:3'
   up: {}, // 装备改装树：{ ski: { core: 3, wax: 1, … } }，没改过的节点不存
   stats: {
     races: 0, wins: 0, podiums: 0, hits: 0, knocked: 0, flips: 0, driftBoosts: 0, shortcuts: 0, pads: 0,
@@ -255,8 +255,7 @@ export function sanitizeProfile(raw) {
       const [slot, id] = String(key).split(':');
       if (!id || String(key).split(':').length !== 2) continue;
       if (slot === 'gear' && GEAR_KEYS.includes(id)) d.owned[key] = true;
-      else if (slot === 'hat' && /^\d+$/.test(id) && +id < HATS.length) d.owned[key] = true;
-      else if (COSMETIC_SLOTS[slot] && /^\d+$/.test(id) && +id < COSMETIC_SLOTS[slot].list.length) d.owned[key] = true;
+      else if (unlockOf(key)?.box) d.owned[key] = true;
     }
   }
   d.up = {};
@@ -414,10 +413,11 @@ export class Profile {
   }
 
   // ---------- 解锁 / 购买 ----------
-  // 'free' 不需要解锁 / 'owned' 已拥有 / 'buy' 可以买 / 'locked' 等级或成就不够
+  // 'free' 不需要解锁 / 'owned' 已拥有 / 'buy' 可以买 / 'locked' 尚未解锁
   unlockState(u, key) {
     if (!u) return 'free';
     if (this.data.owned[key]) return 'owned';
+    if (u.box) return 'locked';
     if (u.ach) return this.data.ach[u.ach] ? 'owned' : 'locked';
     if (u.lv && this.level < u.lv) return 'locked';
     if (u.cost) return 'buy';
@@ -429,8 +429,9 @@ export class Profile {
     return s === 'free' || s === 'owned';
   }
 
-  buy(u, key) {
-    if (this.unlockState(u, key) !== 'buy' || this.data.coins < u.cost) return false;
+  buy(key) {
+    const u = unlockOf(key);
+    if (!u?.cost || this.unlockState(u, key) !== 'buy' || this.data.coins < u.cost) return false;
     this.data.coins -= u.cost;
     this.data.owned[key] = true;
     this.log({ op: 'buy', key });
@@ -443,19 +444,16 @@ export class Profile {
   }
 
   hatOwned(i) {
-    return this.usable(HAT_UNLOCK[i], 'hat:' + i);
+    return i === DEFAULT_HAT || this.boxOwned(`hat:${i}`);
   }
 
   cosmeticOwned(slot, i) {
-    const item = COSMETIC_SLOTS[slot] && COSMETIC_SLOTS[slot].list[i];
-    if (!item) return false;
-    return this.usable(item.unlock, `${slot}:${i}`);
+    return (i === 0 && !!COSMETIC_SLOTS[slot]?.list[0]) || this.boxOwned(`${slot}:${i}`);
   }
 
   // ---------- 雪花补给箱 ----------
-  // 到了等级自动解锁的外观也算已经有了
   boxOwned(key) {
-    return this.usable(unlockOf(key), key);
+    return unlockOf(key)?.box === true && this.data.owned[key] === true;
   }
 
   boxDone() {
@@ -623,13 +621,8 @@ export class Profile {
   // 等级提升后新解锁（或可以购买）的东西
   unlocksBetween(from, to) {
     const out = [];
-    // 补给箱里提前开到的就不再算等级奖励
     const hit = (u, key) => u && u.lv && u.lv > from && u.lv <= to && !this.data.owned[key];
     for (const k of GEAR_KEYS) if (hit(GEAR[k].unlock, 'gear:' + k)) out.push(`${GEAR[k].icon} ${GEAR[k].name}（${GEAR[k].rarity}）${GEAR[k].unlock.cost ? '（可购买）' : ''}`);
-    HAT_UNLOCK.forEach((u, i) => hit(u, 'hat:' + i) && out.push(`发型「${HATS[i]}」${u.cost ? '（可购买）' : ''}`));
-    for (const slot in COSMETIC_SLOTS) {
-      COSMETIC_SLOTS[slot].list.forEach((it, i) => hit(it.unlock, `${slot}:${i}`) && out.push(`${COSMETIC_SLOTS[slot].name}「${it.name}」${it.unlock.cost ? '（可购买）' : ''}`));
-    }
     return out;
   }
 

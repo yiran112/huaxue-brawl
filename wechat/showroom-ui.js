@@ -1,15 +1,18 @@
-import { HATS, SKINS, SUIT_COLORS } from '../src/config.js';
 import {
-  BOX_COST, BOX_POOL, BOX_REFUND, BOX_WEIGHT, COSMETIC_SLOTS, GEAR, GEAR_KEYS, HAT_UNLOCK,
-  RARITY, RARITY_KEYS, SHOP_GEAR, STAT_KEYS, STAT_MAX, STAT_NAMES, TUNE_PLANS, UPGRADES, UP_KEYS, UP_MAX, gearStats, upDesc,
+  BOX_COST, BOX_POOL, BOX_REFUND, BOX_WEIGHT, GEAR, GEAR_KEYS,
+  RARITY, RARITY_KEYS, SHOP_GEAR, STAT_KEYS, STAT_MAX, STAT_NAMES, UP_KEYS, UP_MAX, gearStats,
 } from '../src/gear.js';
 import { ACHIEVEMENTS, CUP_LV, STAT_LABELS } from '../src/profile.js';
 import { CUPS } from '../src/tracks.js';
-import { SHOW, cosmeticOf, hex } from '../src/ui/common.js';
+import { SHOW, cosmeticOf } from '../src/ui/common.js';
 import { card, chip, gradient, hit, meter, pageHeader, scrim, GOLD, NAVY, PALE, ribbon } from './paint.js';
+import { sideNavPanel, sideNavRow } from './side-nav.js';
+import { drawWardrobe } from './wardrobe-ui.js';
+import { drawGarageCatalog } from './garage-catalog-ui.js';
 import { garageStep } from '../src/ui/garage-catalog-state.js';
+import { drawTune } from './tune-ui.js';
 
-const TITLES = { garage: '车库', look: '角色', growth: '成长', shop: '商城' };
+const TITLES = { garage: '车库', growth: '成长', shop: '商城' };
 const RARE = { C: '#cde2ff', B: '#79edcb', A: '#d9a7ff', S: '#ffd569' };
 const SHELF_COLUMNS = 2;
 const SHELF_TILE_HEIGHT = 111;
@@ -38,30 +41,20 @@ function showroom(ui, render) {
     : career ? Math.max(352, Math.min(440, (r - l) * .36))
       : Math.max(300, Math.min(420, w * .24));
   const x = r - rw;
-  SHOW[ui.tab].subs.forEach(([id, name, en], i) => {
-    const row = { x: 0, y: y + 14 + i * 61, w: 150 + Math.max(0, l - 14), h: 61 };
-    const selected = current === id;
-    const c = ui.ctx;
-    c.beginPath();
-    c.moveTo(0, row.y);
-    c.lineTo(row.w, row.y);
-    c.lineTo(row.w - 18, row.y + row.h);
-    c.lineTo(0, row.y + row.h);
-    c.closePath();
-    c.fillStyle = selected ? gradient(c, 0, row.y, row.w, 0, '#fff', '#d9e6ff') : 'rgba(10,20,48,.25)';
-    c.fill();
-    const left = l + 22;
-    ui.text(name, left, row.y + 24, { size: 20, bold: true, color: selected ? '#0b1a44' : '#fff' });
-    ui.text(en, left, row.y + 44, { size: 10, bold: true, color: selected ? '#657595' : '#a5b5de', max: 100 });
-    hit(ui, row, name, () => {
+  const items = SHOW[ui.tab].subs;
+  const rowH = Math.min(50, (b - y - 12) / items.length);
+  const nav = sideNavPanel(ui, { x: l, y, w: Math.min(132, (r - l) * .19), h: items.length * rowH + 12 });
+  items.forEach(([id, name, en], i) => {
+    const row = { ...nav, y: nav.y + i * rowH, h: rowH - 4 };
+    sideNavRow(ui, row, name, () => {
       ui.pendingBuy = null;
       ui.page(id);
       if (shop) {
         ui.offsets.set('shop', SHELVES.find((shelf) => shelf.rarity === id)?.y ?? 0);
       }
-    });
+    }, { active: current === id, detail: en });
   });
-  const stage = { x: l + 140, y, w: x - l - 154, h: b - y - (ui.tab === 'look' || career ? 0 : 147) };
+  const stage = { x: l + 140, y, w: x - l - 154, h: b - y - (career || ui.tab === 'garage' ? 0 : 147) };
   ui.frame = stage;
   ui.gestures.push({ ...stage, orbit: true });
   render(ui, { x, y, w: rw, h: b - y }, current, t, g);
@@ -114,7 +107,7 @@ function tryBuy(ui, unlock, key, equip) {
       ui.pendingBuy = key;
       return ui.invalidate();
     }
-    if (!p.buy(unlock, key)) return;
+    if (!p.buy(key)) return;
   }
   ui.pendingBuy = null;
   equip();
@@ -140,81 +133,8 @@ function gearAttrs(ui, box, gear, id, p) {
   });
 }
 
-function tune(ui, box, id, p) {
-  const { x, y, w } = box;
-  const levels = p.up(id);
-  const plan = ui.tunePlan || 'race';
-  const selected = ui.tuneStep || TUNE_PLANS[plan].path.find((key) => levels[key] < UP_MAX) || 'core';
-  Object.entries(TUNE_PLANS).forEach(([key, route], i) => chip(ui, route.name, { x: x + i * (w / 2 + 2), y, w: w / 2 - 5, h: 29 },
-    () => { ui.tunePlan = key; ui.tuneStep = null; ui.invalidate(); }, { active: key === plan, size: 12 }));
-  const cell = (w - 10) / 3;
-  const px = (col) => x + col * (cell + 5);
-  ui.ctx.strokeStyle = '#869ad7';
-  ui.ctx.lineWidth = 2;
-  ui.ctx.beginPath();
-  ui.ctx.moveTo(px(0) + cell / 2, y + 83);
-  ui.ctx.lineTo(px(2) + cell / 2, y + 83);
-  for (let i = 0; i < 3; i++) {
-    ui.ctx.moveTo(px(i) + cell / 2, y + 81);
-    ui.ctx.lineTo(px(i) + cell / 2, y + 204);
-  }
-  ui.ctx.stroke();
-  for (const [key, node] of Object.entries(UPGRADES)) {
-    const box = { x: px(node.col), y: y + 39 + node.row * 46, w: cell, h: 38 };
-    const ready = p.upgradeCost(id, key) > 0 || levels[key] === UP_MAX;
-    ui.panel(box.x, box.y, box.w, box.h, key === selected ? '#4f7bff' : ready ? '#182a67' : '#172144',
-      7, key === selected ? '#fff' : TUNE_PLANS[plan].path.includes(key) ? GOLD : '#526896');
-    ui.text(`${node.icon} ${node.name}`, box.x + cell / 2, box.y + 12, { center: true, size: 11, bold: true, max: cell - 6 });
-    ui.text(`${levels[key]}/${UP_MAX}`, box.x + cell / 2, box.y + 28, { center: true, size: 11, color: GOLD, bold: true });
-    hit(ui, box, node.name, () => { ui.tuneStep = key; ui.invalidate(); });
-  }
-  const node = UPGRADES[selected];
-  ui.text(node.name, x, y + 236, { bold: true, size: 14 });
-  ui.paragraph(upDesc(selected), x, y + 255, w - 6, { size: 11, color: PALE, lines: 2 });
-  const cost = p.upgradeCost(id, selected);
-  chip(ui, cost ? `改装 ⬢ ${cost}` : levels[selected] >= UP_MAX ? '已满级' : '前置未完成',
-    { x, y: y + 275, w, h: 28 }, cost ? () => {
-      if (!p.upgrade(id, selected)) ui.toast('改装币不足或装备尚未解锁', true);
-      ui.invalidate();
-    } : null, { fill: cost ? GOLD : '#ffffff22', color: cost ? NAVY : PALE, size: 13 });
-}
-
-function gearStrip(ui, panel, id, p) {
-  const x = Math.max(ui.l + 152, panel.x - Math.min(390, (panel.x - ui.l) * .64));
-  const w = panel.x - x - 12;
-  const rank = ui.gearRank || GEAR[id].rarity;
-  RARITY_KEYS.forEach((key, i) => {
-    const all = GEAR_KEYS.filter((k) => GEAR[k].rarity === key);
-    const cell = (w - 18) / 4;
-    chip(ui, `${key} ${RARITY[key].name} ${all.filter((k) => p.gearOwned(k)).length}/${all.length}`,
-      { x: x + i * (cell + 6), y: ui.b - 175, w: cell, h: 31 }, () => {
-        ui.gearRank = key;
-        ui.offsets.delete('gear');
-        gearPick(ui, all[0]);
-      }, { active: rank === key, color: rank === key ? NAVY : RARE[key], fill: rank === key ? '#fff' : '#122256', size: 12, radius: 6 });
-  });
-  const list = { x, y: ui.b - 130, w, h: 126 };
-  const items = GEAR_KEYS.filter((key) => GEAR[key].rarity === rank);
-  ui.scrollArea('gear', list, items.length * 161, (offset) => {
-    items.forEach((gear, i) => {
-      const box = { x: x + 1 + i * 161 - offset, y: list.y + 2, w: 151, h: 116 };
-      if (box.x + box.w < x || box.x > x + w) return;
-      const picked = id === gear;
-      const owned = p.gearOwned(gear);
-      card(ui, box, owned ? ['#fff', '#e6ecf9'] : ['#dce3f3', '#c6d1e5'],
-        { stroke: picked ? GOLD : '#9fb4dd', width: 2, radius: 12, shadow: 3 });
-      ui.models.push({ x: box.x + 6, y: box.y + 19, w: 139, h: 69, gear });
-      const equipped = gear === ui.game.look.gear;
-      if (equipped || !owned) chip(ui, equipped ? '使用中' : '🔒', {
-        x: box.x + (equipped ? 7 : 124), y: box.y + 7, w: equipped ? 56 : 20, h: 19,
-      }, null, { fill: '#1b2545', color: GOLD, size: 11, radius: 6 });
-      ui.text(GEAR[gear].name, box.x + 75, box.y + 102, { center: true, size: 14, color: NAVY, bold: true, max: box.w - 13 });
-      hit(ui, box, GEAR[gear].name, () => gearPick(ui, gear));
-    });
-  }, true);
-}
-
-function garage(ui, panel, sub, _, g) {
+function garage(ui, panel) {
+  const g = ui.game;
   const p = g.profile;
   const id = ui.previewGear || g.look.gear;
   const gear = GEAR[id];
@@ -226,21 +146,15 @@ function garage(ui, panel, sub, _, g) {
   const origin = { ...panel, h: panel.h - 80 };
   const mods = UP_KEYS.reduce((sum, k) => sum + p.up(id)[k], 0);
   const body = infoPanel(ui, origin, { badge: gear.icon, small: `${gear.rarity} · ${rare.name} · ${equipped ? '使用中' : owned ? '已拥有' : st === 'buy' ? '可购买' : '未解锁'}`,
-    title: gear.name, side: `改装 ${mods} / 30` });
+    title: gear.name, side: `改装 ${mods} / ${UP_KEYS.length * UP_MAX}` });
   const x = body.x + tag(ui, `${gear.rarity} · ${rare.name}`, body.x, body.y, '#617197');
   const sorted = STAT_KEYS.slice().sort((a, b) => gear.stats[b] - gear.stats[a]);
   tag(ui, gear.stats[sorted[0]] === gear.stats[sorted[4]] ? '各项均衡' : STAT_NAMES[sorted[0]] + '突出', x, body.y, '#d17a20');
   body.y += 37;
   body.h -= 37;
-  ui.scrollArea('garage-info', body, sub === 'up' ? 310 : 259, (offset) => {
-    const area = { ...body, y: body.y - offset };
-    if (sub === 'up') tune(ui, area, id, p);
-    else gearAttrs(ui, area, gear, id, p);
-  });
-  gearStrip(ui, panel, id, p);
+  ui.scrollArea('garage-info', body, 259, (offset) => gearAttrs(ui, { ...body, y: body.y - offset }, gear, id, p));
   const w = (panel.w - 12) / 2;
-  ribbon(ui, sub === 'up' ? '属性' : '改装', { x: panel.x, y: ui.b - 66, w, h: 61 },
-    () => ui.page(sub === 'up' ? 'attr' : 'up'), { sub: sub === 'up' ? 'PROPERTY' : 'TUNING' });
+  ribbon(ui, '改装', { x: panel.x, y: ui.b - 66, w, h: 61 }, () => ui.page('up'), { sub: 'TUNING' });
   const shop = !owned && gear.unlock?.shop;
   const label = equipped ? '使用中' : owned ? '选用' : shop ? '去商城' : st === 'locked' ? '未解锁' : ui.pendingBuy === key ? '确认购买' : '购买';
   const en = equipped ? 'EQUIPPED' : owned ? 'EQUIP' : shop || st === 'buy' ? `❄ ${gear.unlock.cost}` : `Lv.${gear.unlock?.lv || 1}`;
@@ -248,88 +162,18 @@ function garage(ui, panel, sub, _, g) {
     if (shop) { ui.openTab('shop'); gearPick(ui, id, true); ui.page(gear.rarity); return; }
     tryBuy(ui, gear.unlock, key, () => g.setLook('gear', id));
   }, { sub: en, primary: true, muted: equipped || (!shop && st === 'locked') });
-  if (sub === 'up') return;
-  // 展台左右两个圆按钮：切到上一件 / 下一件
+  // 展台左右两个圆按钮：切到目录里的上一件 / 下一件（按目录当前的筛选和排序）
   const step = (dir) => {
     ui.upSel = null;
     gearPick(ui, garageStep(g, ui.garageCatalog || {}, id, dir));
   };
   const size = 50;
   const cy = (ui.t + ui.b) / 2;
-  for (const [x, glyph, dir] of [[ui.l + 162, '‹', -1], [panel.x - 14 - size, '›', 1]]) {
+  const left = ui.l + 162;
+  const right = panel.x - 14 - size;
+  for (const [x, glyph, dir] of [[left, '‹', -1], [right, '›', 1]]) {
     chip(ui, glyph, { x, y: cy - size / 2, w: size, h: size }, () => step(dir), { fill: 'rgba(12,28,76,.66)', radius: size / 2, size: 34 });
   }
-}
-
-function listChoices(ui, label, x, y, w, options) {
-  ui.text(label, x, y + 12, { size: 13, bold: true, color: PALE });
-  let dx = x, dy = y + 27;
-  for (const option of options) {
-    const ww = option.color ? 29 : Math.min(w, Math.max(40, option.label.length * 12 + 15));
-    if (dx + ww > x + w) { dy += 38; dx = x; }
-    const box = { x: dx, y: dy, w: ww, h: option.color ? 29 : 33 };
-    if (option.color) {
-      ui.panel(box.x + 2, box.y + 2, 25, 25, option.color, 14, option.selected ? '#fff' : '#ffffff73');
-      if (option.selected) {
-        ui.rounded(box.x, box.y, 29, 29, 14);
-        ui.ctx.strokeStyle = '#fff'; ui.ctx.lineWidth = 2; ui.ctx.stroke();
-      }
-      hit(ui, box, label, option.run);
-    } else {
-      chip(ui, option.label, box, option.run, { fill: option.selected ? '#4f7bff' : '#ffffff16', color: option.locked ? '#bbc8ec9c' : '#fff', size: 13 });
-      if (option.selected) {
-        ui.rounded(box.x, box.y, box.w, box.h, 10);
-        ui.ctx.strokeStyle = '#fff'; ui.ctx.lineWidth = 2; ui.ctx.stroke();
-      }
-    }
-    dx += ww + 5;
-  }
-  return dy + 48;
-}
-
-function looks(ui, panel, sub, _, g) {
-  const p = g.profile, L = g.look;
-  const body = infoPanel(ui, panel, { badge: '🎨', small: '角色造型', title: g.playerName, side: GEAR[L.gear].icon + ' ' + GEAR[L.gear].name });
-  tag(ui, HATS[L.hat], body.x, body.y, '#d17a20');
-  chip(ui, '个人资料', { x: body.x + body.w - 96, y: body.y - 4, w: 96, h: 32 },
-    () => g.account.openManage(), { size: 13 });
-  body.y += 42;
-  body.h -= 42;
-  const assign = (field, value) => { g.setLook(field, value); ui.invalidate(); };
-  const sw = (field, colors) => colors.map((value) => ({
-    color: hex(value), selected: L[field] === value, run: () => assign(field, value),
-  }));
-  const pieces = (field, items) => items.map((item, i) => {
-    const key = `${field}:${i}`;
-    const state = p.unlockState(item.unlock, key);
-    return {
-      label: state === 'locked' ? '🔒 ' + item.name : state === 'buy'
-        ? (ui.pendingBuy === key ? '确认 ❄' + item.unlock.cost : item.name + ' ❄' + item.unlock.cost) : item.name,
-      locked: state === 'locked', selected: L[field] === i, run: () => tryBuy(ui, item.unlock, key, () => assign(field, i)),
-    };
-  });
-  const rows = sub === 'color' ? [['帽子 / 头发', sw('hatColor', [...SUIT_COLORS, 0x2a1a12, 0x7ad21f])],
-    ['上衣', sw('jacket', SUIT_COLORS)], ['条纹 / 袖口', sw('stripe', SUIT_COLORS)], ['裤子', sw('pants', SUIT_COLORS)], ['板子 / 雪橇', sw('ski', SUIT_COLORS)]]
-    : sub === 'acc' ? Object.entries(COSMETIC_SLOTS).map(([field, part]) => [part.name, pieces(field, part.list)]) : [
-      ['发型 / 帽子', pieces('hat', HATS.map((name, i) => ({ name, unlock: HAT_UNLOCK[i] })))], ['肤色', sw('skin', SKINS)],
-      ['胡子', [[false, '无'], [true, '有']].map(([value, label]) => ({ label, selected: !!L.mustache === value, run: () => assign('mustache', value) }))],
-    ];
-  const estimated = 25 + rows.reduce((h, [, cells]) => {
-    let used = 0, lines = 1;
-    for (const item of cells) {
-      const n = (item.color ? 29 : Math.max(40, item.label.length * 12 + 15)) + 5;
-      if (used && used + n > body.w) { used = 0; lines++; }
-      used += n;
-    }
-    return h + 75 + (lines - 1) * 38;
-  }, 0) + (sub === 'color' ? 0 : 40);
-  ui.scrollArea('look-' + sub, body, estimated, (offset) => {
-    let y = body.y + 5 - offset;
-    section(ui, sub === 'color' ? '配色' : sub === 'acc' ? '饰品' : '造型', body.x, y + 5);
-    y += 23;
-    rows.forEach(([label, items]) => { y = listChoices(ui, label, body.x, y, body.w, items); });
-    if (sub !== 'color') ui.paragraph('🔒 的部件升级或达成成就后解锁。标着 ❄ 的用雪花币购买。', body.x, y + 5, body.w, { size: 12, lines: 2 });
-  });
 }
 
 function levelStrip(ui, panel, p) {
@@ -343,8 +187,6 @@ function levelStrip(ui, panel, p) {
     items.get(rule.lv).push({ name, icon, buy: !!rule.cost });
   };
   GEAR_KEYS.forEach((key) => add(GEAR[key].unlock, GEAR[key].icon, GEAR[key].name));
-  HAT_UNLOCK.forEach((rule, i) => add(rule, '💇', HATS[i]));
-  for (const slot of Object.values(COSMETIC_SLOTS)) slot.list.forEach((item) => add(item.unlock, '🎁', item.name));
   CUPS.forEach((cup, i) => add({ lv: CUP_LV[i] }, cup.icon, cup.name + '赛道'));
   const rows = [...items].sort((a, b) => a[0] - b[0]);
   const next = rows.find(([lv]) => lv > p.level)?.[0];
@@ -473,7 +315,7 @@ function shop(ui, panel, _, __, g) {
     card(ui, { x: list.x, y: sy + 29, w: list.w, h: 106 }, ['#ff4f95', '#ff9d60'], { stripe: .13, radius: 12, width: 2 });
     ui.text('🎁', list.x + 40, sy + 77, { center: true, size: 44 });
     const bx = list.x + 74;
-    ui.text('开箱惊喜', bx, sy + 48, { size: 22, bold: true, italic: true, outline: true });
+    ui.text('外观抽奖', bx, sy + 48, { size: 22, bold: true, italic: true, outline: true });
     ui.text(`随机开出一件外观，重复返还 ❄${BOX_REFUND}`, bx, sy + 68, { size: 12, bold: true, max: list.w - 86 });
     ui.text(`传说 ${BOX_WEIGHT.S}%  稀有 ${BOX_WEIGHT.A}%  普通 ${BOX_WEIGHT.C}%`, bx, sy + 84, { size: 11, bold: true, max: list.w - 86 });
     ui.text(`❄ ${BOX_COST}`, list.x + list.w - 143, sy + 110, { size: 14, bold: true, right: true });
@@ -555,5 +397,12 @@ function shop(ui, panel, _, __, g) {
 }
 
 export function drawShowroom(ui) {
-  showroom(ui, { garage, look: looks, growth, shop }[ui.tab]);
+  if (ui.tab === 'look') return drawWardrobe(ui);
+  if (ui.tab === 'garage' && !ui.previewGear) return drawGarageCatalog(ui, (id) => {
+    ui.upSel = null;
+    ui.page('attr');
+    gearPick(ui, id);
+  });
+  if (ui.tab === 'garage' && ui.panelPage === 'up') return drawTune(ui, ui.previewGear);
+  showroom(ui, { garage, growth, shop }[ui.tab]);
 }

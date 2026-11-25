@@ -2,16 +2,22 @@ import * as THREE from 'three';
 import { fetchLeaderboard } from '../src/account.js';
 import { seasonNow } from '../src/profile.js';
 import { SHOP_GEAR } from '../src/gear.js';
+import { previewWardrobe, wardrobeState } from '../src/ui/appearance.js';
 import { drawMenu, drawMatch, drawAccount, drawResults } from './pages.js';
 import { drawRace, drawPause, drawReplay } from './race-ui.js';
 import { ModelPreviews } from './model-previews.js';
 import { screenQuad } from './display.js';
+import { gameIconImage, iconRuns, iconToken } from '../src/icon-art.js';
 
 const COLORS = {
   panel: 'rgba(11,21,48,.88)',
   line: 'rgba(255,255,255,.17)',
   pale: '#d1d9ee',
 };
+
+function runWidth(context, run, size) {
+  return typeof run === 'string' ? context.measureText(run).width : size * 1.1;
+}
 
 export class MiniUI {
   constructor(game) {
@@ -30,6 +36,7 @@ export class MiniUI {
     this.beepT = 0;
     this.canvas = wx.createCanvas();
     this.ctx = this.canvas.getContext('2d');
+    this.redrawIcons = () => this.invalidate();
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.generateMipmaps = false;
     this.texture.minFilter = THREE.LinearFilter;
@@ -157,33 +164,61 @@ export class MiniUI {
     return `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${size}px "Microsoft YaHei", "PingFang SC", sans-serif`;
   }
 
+  icon(id, x, y, width, height = width) {
+    const image = gameIconImage(id, this.redrawIcons);
+    if (image) this.ctx.drawImage(image, x, y, width, height);
+  }
+
   text(value, x, y, { size = 17, color = '#fff', bold = false, italic = false, center = false, right = false, max = this.r - this.l, outline = false } = {}) {
     const c = this.ctx;
     c.font = this.font(size, bold, italic);
     c.textAlign = center ? 'center' : right ? 'right' : 'left';
     c.textBaseline = 'middle';
     const text = String(value);
+    const runs = iconRuns(text);
     if (outline) {
       c.lineWidth = Math.max(2, size / 8);
       c.strokeStyle = '#0b1530';
       c.lineJoin = 'round';
-      c.strokeText(text, x, y, max);
     }
     c.fillStyle = color;
-    c.fillText(text, x, y, max);
+    if (!runs) {
+      if (outline) c.strokeText(text, x, y, max);
+      c.fillText(text, x, y, max);
+      return;
+    }
+    const widths = runs.map((run) => runWidth(c, run, size));
+    const natural = widths.reduce((sum, width) => sum + width, 0);
+    const scale = natural > max ? Math.max(0, max / natural) : 1;
+    if (!natural || !scale) return;
+    let left = x - natural * scale * (center ? .5 : right ? 1 : 0);
+    c.textAlign = 'left';
+    for (const [i, run] of runs.entries()) {
+      const width = widths[i] * scale;
+      if (typeof run === 'string') {
+        if (outline) c.strokeText(run, left, y, width);
+        c.fillText(run, left, y, width);
+      } else this.icon(run.id, left, y - width / 2, width);
+      left += width;
+    }
   }
 
   paragraph(value, x, y, width, { size = 15, color = COLORS.pale, lines = 3, bold = false, center = false } = {}) {
     this.ctx.font = this.font(size, bold);
-    const rows = [''];
-    for (const char of String(value)) {
+    const rows = [[]];
+    const runs = iconRuns(value);
+    const glyphs = runs ? runs.flatMap((run) => typeof run === 'string' ? [...run] : [run]) : String(value);
+    for (const char of glyphs) {
       const i = rows.length - 1;
-      if (char === '\n' || this.ctx.measureText(rows[i] + char).width > width) {
-        if (rows.length >= lines) { rows[i] = rows[i].slice(0, -1) + '…'; break; }
-        rows.push(char === '\n' ? '' : char);
-      } else rows[i] += char;
+      const row = [...rows[i], char];
+      const measured = runs ? row.reduce((sum, run) => sum + runWidth(this.ctx, run, size), 0) : this.ctx.measureText(row.join('')).width;
+      if (char === '\n' || measured > width) {
+        if (rows.length >= lines) { rows[i].pop(); rows[i].push('…'); break; }
+        rows.push(char === '\n' ? [] : [char]);
+      } else rows[i].push(char);
     }
-    rows.forEach((line, i) => this.text(line, x, y + i * (size + 6), { size, color, max: width, bold, center }));
+    rows.forEach((line, i) => this.text(line.map((run) => typeof run === 'string' ? run : iconToken(run.id)).join(''),
+      x, y + i * (size + 6), { size, color, max: width, bold, center }));
     return rows.length * (size + 6);
   }
 
@@ -268,20 +303,44 @@ export class MiniUI {
     this.achievement = null;
     this.boxWin = null;
     this.previewGear = tab === 'shop' ? SHOP_GEAR[0] : null;
-    this.gearRank = null;
     if (tab === 'race') this.racePick = 'home';
-    const label = { garage: 'GARAGE', look: 'STYLE', shop: 'SHOP', growth: 'CAREER' }[tab];
-    this.game.setShow(label, label ? this.previewGear || this.game.look.gear : null);
+    if (tab === 'look') {
+      this.wardrobeReveal = true;
+      previewWardrobe(this.game, wardrobeState(this.game, this.wardrobeSelection));
+    }
+    else {
+      const label = { shop: 'SHOP', growth: 'CAREER' }[tab];
+      this.game.setShow(label, label ? this.previewGear || this.game.look.gear : null);
+    }
     this.invalidate();
   }
 
   page(name) {
-    if (name !== this.panelPage) this.offsets.delete('garage-info');
+    if (name !== this.panelPage) {
+      this.offsets.delete('garage-info');
+      if (this.tab === 'garage' && this.previewGear) {
+        if (name === 'up') this.game.setShow(null);
+        else if (name === 'attr') this.game.setShow('GARAGE', this.previewGear);
+      }
+    }
     this.panelPage = name;
     this.invalidate();
   }
 
   back() {
+    if (this.tab === 'garage' && this.previewGear) {
+      if (this.panelPage === 'up') { this.page('attr'); return; }
+      this.previewGear = null;
+      this.pendingBuy = null;
+      this.game.setShow(null);
+      this.page('');
+      return;
+    }
+    if (this.tab === 'race' && (this.panelPage || this.racePick) === 'rank' && this.rankSection && this.rankSection !== 'rank') {
+      this.rankSection = 'rank';
+      this.invalidate();
+      return;
+    }
     if (this.tab === 'race' && this.panelPage) {
       if (this.panelPage === this.racePick) this.racePick = 'home';
       this.page('');

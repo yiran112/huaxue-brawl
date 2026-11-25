@@ -1,11 +1,12 @@
 import { LENGTHS, MODE_KEYS, MODES, THEMES, THEME_KEYS } from '../src/config.js';
 import { CUP_LV, seasonNow, seasonLeftText, rankSeasonNow, seasonReward } from '../src/profile.js';
-import { RANK_LV, RANK_MODES, TIERS } from '../src/rank.js';
+import { RANK_LV } from '../src/rank.js';
 import { CUPS, TRACKS, TRACK_MAP, medalTimes } from '../src/tracks.js';
-import { MODE_STYLE, THEME_ICON, TIER_ICONS, hex } from '../src/ui/common.js';
+import { MODE_STYLE, THEME_ICON, hex } from '../src/ui/common.js';
 import { FEAT, trackFeats } from '../src/ui/trackArt.js';
 import { clamp, fmtTime } from '../src/util.js';
 import { card, chip, gradient, hit, meter, pageHeader, scrim, GOLD, NAVY, PALE, ribbon } from './paint.js';
+import { sideNavPanel, sideNavRow } from './side-nav.js';
 import { drawTrackArt } from './track-art.js';
 
 const TABS = [['growth', '成长'], ['garage', '车库'], ['shop', '商城'], ['set', '设置']];
@@ -285,7 +286,7 @@ export function drawHome(ui) {
   const mx = x + large + 13;
   const mh = (h - 10) / 2;
   const rank = p.rankOpen() ? p.rankView().line : `Lv.${RANK_LV} 开启`;
-  midCard(ui, { x: mx, y: by, w: mid, h: mh }, '排位赛', '🏅', ['#7a5cff', '#4a2fd0'], () => ui.page('rank'), rank);
+  midCard(ui, { x: mx, y: by, w: mid, h: mh }, '排位赛', '🏅', ['#7a5cff', '#4a2fd0'], () => { ui.rankSection = 'rank'; ui.page('rank'); }, rank);
   midCard(ui, { x: mx, y: by + mh + 10, w: mid, h: mh }, '开房间', '🏠', ['#5bb487', '#2e8a62'],
     () => showHall(ui));
   homeTrack(ui, { x: mx + mid + 13, y: by, w: track, h });
@@ -392,20 +393,24 @@ export function drawTrackMenu(ui) {
   card(ui, { x, y, w, h }, ['rgba(44,79,178,.92)', 'rgba(16,30,83,.97)'],
     { stroke: 'rgba(111,165,255,.73)', width: 2, shadow: 4 });
   const active = ui.trackGroup || 'all';
-  const nav = [['all', '🗺️', '全部赛道', `${TRACKS.length} 条固定 + 随机`],
+  const options = [['all', '🗺️', '全部赛道', `${TRACKS.length} 条固定 + 随机`],
     ['random', '🎲', '随机生成', '每局都不一样'],
-    ...CUPS.map((cup, i) => [cup.id, p.trackUnlocked(cup.tracks[0]) ? cup.icon : '🔒', cup.name,
-      p.trackUnlocked(cup.tracks[0]) ? `奖牌 ${cup.tracks.filter((id) => p.data.medals[id]).length} / ${cup.tracks.length}` : `Lv.${CUP_LV[i]} 解锁`])];
-  nav.forEach(([id, icon, label, detail], i) => {
-    const row = { x: x + 2, y: y + 15 + i * 57, w: 172, h: 57 };
-    if (id === active) {
-      ui.panel(row.x, row.y, row.w, row.h, gradient(ui.ctx, row.x, row.y, row.w, 0, 'rgba(120,200,255,.40)', 'rgba(120,200,255,0)'), 0, null);
-      ui.panel(row.x, row.y, 4, row.h, '#6fe0ff', 0, null);
-    }
-    ui.text(icon, x + 35, row.y + 29, { size: 23, center: true });
-    ui.text(label, x + 60, row.y + 21, { size: 17, bold: true });
-    ui.text(detail, x + 60, row.y + 40, { size: 11, bold: true, color: PALE });
-    hit(ui, row, label, () => { ui.trackGroup = id; ui.offsets.delete('tracks'); ui.invalidate(); });
+    ...CUPS.map((cup, i) => {
+      const locked = !p.trackUnlocked(cup.tracks[0]);
+      const detail = locked ? `Lv.${CUP_LV[i]} 解锁` : `奖牌 ${cup.tracks.filter((id) => p.data.medals[id]).length} / ${cup.tracks.length}`;
+      return [cup.id, locked ? '🔒' : cup.icon, cup.name, detail, locked];
+    })];
+  const rowH = 46;
+  const navH = Math.min(h - 80, options.length * rowH + 12);
+  const nav = sideNavPanel(ui, { x: x + 9, y: y + 15, w: 165, h: navH });
+  const content = options.length * rowH;
+  const navW = nav.w - (content > nav.h ? 6 : 0);
+  ui.scrollArea('track-categories', nav, content, (offset) => {
+    options.forEach(([id, icon, label, detail, locked], i) => {
+      const row = { ...nav, y: nav.y + i * rowH - offset, w: navW, h: rowH - 4 };
+      sideNavRow(ui, row, label, () => { ui.trackGroup = id; ui.offsets.delete('tracks'); ui.invalidate(); },
+        { active: id === active, icon, detail, locked });
+    });
   });
   const bx = x + 188, by = y + 15, bw = w - 205;
   ui.panel(bx, by, bw, 114, 'rgba(10,24,71,.68)', 13, null);
@@ -447,42 +452,6 @@ export function drawTrackMenu(ui) {
     { skew: SKEW, sub: '房间列表' });
   ribbon(ui, fromRoom ? '用这条开始' : '开始这场', { x: ui.r - 247, y: ui.b - 76, w: 224, h: 58 }, () => fromRoom ? ui.page('') : g.startTournament(),
     { skew: SKEW, primary: true, sub: `${MODES[r.mode].icon} ${MODES[r.mode].name}` });
-}
-
-export function drawRankMenu(ui) {
-  const g = ui.game, p = g.profile;
-  const y = pageHeader(ui, '排位赛') - 24;
-  const x = ui.l + clamp(ui.w * .24, 300, 420) + 15;
-  const w = ui.r - 12 - x, h = ui.b - y;
-  const view = p.rankView();
-  card(ui, { x, y, w, h }, 'rgba(35,30,78,.89)', { radius: 20 });
-  ui.text(`${view.name} ${view.star}`, x + 23, y + 42, { bold: true, italic: true, size: 30 });
-  ui.text(`${view.pts} 分 · ${view.next}`, x + w - 19, y + 31, { bold: true, right: true, size: 14 });
-  ui.text(`${view.wins} 胜 / ${view.games} 场`, x + w - 19, y + 50, { bold: true, right: true, size: 13 });
-  const stride = (w - 46) / TIERS.length;
-  TIERS.forEach((tier, i) => {
-    const h = 37 + i * 6;
-    const b = { x: x + 23 + i * stride, y: y + 184 - h, w: stride - 5, h };
-    const on = i === view.index;
-    ui.panel(b.x, b.y, b.w, b.h, on ? gradient(ui.ctx, b.x, b.y, 0, b.h, '#daa05d', '#9d5a26') : '#ffffff33', 7, on ? '#fff' : null);
-    ui.text(TIER_ICONS[i], b.x + b.w / 2, b.y - 15, { size: 24, center: true });
-    ui.text(tier.name, b.x + b.w / 2, b.y + 14, { size: 14, center: true, bold: true });
-    ui.text(tier.min + (i === TIERS.length - 1 ? '+' : ''), b.x + b.w / 2, b.y + 30, { size: 11, center: true, color: PALE });
-  });
-  const picked = RANK_MODES.find((rank) => rank.id === ui.rankMode) || RANK_MODES[0];
-  const cell = (w - 46 - 20) / 3;
-  RANK_MODES.forEach((rank, i) => {
-    const box = { x: x + 23 + i * (cell + 10), y: y + 201, w: cell, h: 146 };
-    ui.panel(box.x, box.y, box.w, box.h, rank === picked ? 'rgba(255,210,60,.17)' : 'rgba(255,255,255,.08)', 14, rank === picked ? GOLD : '#ffffff55');
-    ui.text(rank.icon, box.x + 16, box.y + 34, { size: 26 });
-    ui.text(rank.name, box.x + 15, box.y + 66, { size: 18, bold: true });
-    ui.paragraph(rank.blurb, box.x + 15, box.y + 88, box.w - 28, { size: 12, color: PALE, bold: true, lines: 3 });
-    hit(ui, box, rank.name, () => { ui.rankMode = rank.id; ui.invalidate(); });
-  });
-  ribbon(ui, '开始匹配', { x: ui.r - 261, y: ui.b - 73, w: 228, h: 57 }, () => {
-    if (g.mini.online) g.startRank(picked.id);
-    else ui.toast('联机服务暂不可用', true);
-  }, { skew: SKEW, primary: true, sub: picked.name });
 }
 
 export function drawHall(ui) {

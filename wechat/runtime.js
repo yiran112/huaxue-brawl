@@ -129,7 +129,7 @@ export const documentAdapter = {
   hidden: false,
   get visibilityState() { return this.hidden ? 'hidden' : 'visible'; },
   getElementById: (id) => id === 'c' ? screenCanvas : null,
-  createElement: makeCanvas,
+  createElement: (tag) => tag === 'img' ? wx.createImage() : makeCanvas(),
   createElementNS: makeCanvas,
   addEventListener: (type, fn) => handlers(type).add(fn),
   removeEventListener: (type, fn) => handlers(type).delete(fn),

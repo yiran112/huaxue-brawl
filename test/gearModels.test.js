@@ -10,7 +10,7 @@ const ctx = new Proxy({}, {
 });
 globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) };
 
-const { GEAR, GEAR_KEYS } = await import('../src/gear.js');
+const { GEAR, GEAR_KEYS, GEAR_COLOR } = await import('../src/gear.js');
 const { GEAR_MODELS, gearKit, bakeGear } = await import('../src/gearModels.js');
 
 const lam = (color, opts) => new THREE.MeshLambertMaterial({ color, ...(opts || {}) });
@@ -19,7 +19,7 @@ const lam = (color, opts) => new THREE.MeshLambertMaterial({ color, ...(opts || 
 function build(id) {
   const def = GEAR[id];
   const spec = GEAR_MODELS[def.model];
-  const kit = gearKit(lam, 0xf4f4f4, def.trim, -(spec.lift || 0));
+  const kit = gearKit(lam, GEAR_COLOR, def.trim, -(spec.lift || 0));
   const parts = [];
   if (spec.ski) {
     for (let i = 0; i < 2; i++) {

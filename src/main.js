@@ -1,6 +1,6 @@
 // 雪山大乱斗 - 主程序
 import * as THREE from 'three';
-import { THEMES, THEME_KEYS, LENGTHS, LOOK_PRESETS, BOT_NAMES, DEFAULT_RULES, POINTS, SKINS, MODES } from './config.js';
+import { THEMES, THEME_KEYS, LENGTHS, LOOK_PRESETS, DEFAULT_HAT, BOT_NAMES, DEFAULT_RULES, POINTS, SKINS, MODES } from './config.js';
 import { GEAR, LOOK_EXTRA_DEFAULTS, COSMETIC_SLOTS, uniformUp, pickBotGear } from './gear.js';
 import { CEDAR_PRACTICE, PRACTICE_SECONDS, TRACK_MAP } from './tracks.js';
 import { RANK_LV, RANK_MAP, scoreLeave, ESCAPE_EXTRA } from './rank.js';
@@ -365,8 +365,10 @@ export class Game {
     const L = this.look;
     const P = this.profile;
     if (!GEAR[L.gear] || !P.gearOwned(L.gear)) L.gear = 'ski';
-    if (!P.hatOwned(L.hat | 0)) L.hat = 0;
+    if (!P.hatOwned(L.hat)) L.hat = DEFAULT_HAT;
     for (const slot in COSMETIC_SLOTS) if (!P.cosmeticOwned(slot, L[slot] | 0)) L[slot] = 0;
+    // 老存档里有玩家自己选的装备颜色；现在装备颜色是做好的（GEAR_COLOR），不再存
+    delete L.ski;
   }
 
   // 机器人：预设外观 + 随机装备和配饰
@@ -572,6 +574,8 @@ export class Game {
   }
 
   setLook(k, v) {
+    if (k === 'hat' && !this.profile.hatOwned(v)) return;
+    if (COSMETIC_SLOTS[k] && !this.profile.cosmeticOwned(k, v)) return;
     this.look[k] = v;
     save(LS_LOOK, this.look);
     if (this.netMode && !this.customRoom && this.state === 'menu') this.net.sendJson({ t: 'look', look: this.look });
@@ -583,10 +587,11 @@ export class Game {
   // label：展台背后的全息大字，传 null 表示回到缆车大厅；
   // gear：车库里正在看的装备，可以是还没拥有的，只用来预览；
   // patch：只在展台上试穿的外观字段（商城补给箱开出来的东西）
-  setShow(label, gear, patch) {
+  setShow(label, gear, patch, view) {
     this.showLabel = label || null;
     this.showGear = gear || null;
     this.showPatch = patch || null;
+    this.showView = view || null;
     this.syncShow();
   }
 
@@ -602,6 +607,7 @@ export class Game {
     if (!room) return;
     if (on) {
       room.setLabel(this.showLabel);
+      room.setView(this.showView);
       // 车库、商城里看装备：台上不摆人，只摆放大了的装备（商城开箱试穿外观时还是摆人）
       const gearOnly = this.showLabel === 'GARAGE' || (this.showLabel === 'SHOP' && !this.showPatch);
       room.setLook({ ...this.look, ...(this.showGear ? { gear: this.showGear } : null), ...this.showPatch }, gearOnly);
@@ -747,7 +753,7 @@ export class Game {
       this.themeKey = this.resolveTheme();
     }
     const botUp = uniformUp([0, 1, 2][this.rules.difficulty] ?? 1);
-    const practiceLook = practice && { ...this.look, gear: s.gear, ski: s.gear === 'ski' ? 0x297da8 : 0xc44a31, trail: 0 };
+    const practiceLook = practice && { ...this.look, gear: s.gear, trail: 0 };
     const roster = [];
     for (let i = 0; i < 1 + this.rules.bots; i++) {
       roster.push({
@@ -2330,10 +2336,11 @@ export class Game {
     room.update(dt);
     const p = room.group.position;
     const cam = this.camera;
-    // 车库只摆装备时框得比整个人小一圈，装备显得大。
+    // 换装看局部时凑近人；车库只摆装备时框得比整个人小一圈，装备显得大。
     // 高的载具倾过来要抬得更高：镜头对准台面到装备最高点的中间，框的高度也跟着放，上下各留一点边
-    const lc = room.gear ? this.frameCam(dt, 5.2, Math.max(3.2, room.gearTop + 0.6), 4, 14) : this.frameCam(dt, SHOW_W, SHOW_H, 4.5, 14);
-    const aim = room.gear ? Math.max(0.9, room.gearTop / 2) : 0.9;
+    const gearOnly = !room.view && room.gear;
+    const lc = room.view ? this.frameCam(dt, 2.7, 2.7, 3.6, 14) : gearOnly ? this.frameCam(dt, 5.2, Math.max(3.2, room.gearTop + 0.6), 4, 14) : this.frameCam(dt, SHOW_W, SHOW_H, 4.5, 14);
+    const aim = gearOnly ? Math.max(0.9, room.gearTop / 2) : 0.9;
     this.showAim = this.showAim === undefined ? aim : lerp(this.showAim, aim, damp(5, dt));
     const ax = p.x + lc.x;
     const ay = p.y + STAGE_TOP + this.showAim + lc.y;

@@ -1,0 +1,29 @@
+.game-icon {
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  object-fit: contain;
+  vertical-align: -.2em;
+  pointer-events: none;
+}
+
+.game-icon.rarity-art {
+  width: 1.45em;
+  height: 1.45em;
+  vertical-align: -.31em;
+}
+
+.rarity-corner {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 5px;
+  line-height: 0;
+  pointer-events: none;
+}
+
+.rarity-corner .rarity-art {
+  width: var(--rarity-size, clamp(25px, 2.9vw, 38px));
+  height: var(--rarity-size, clamp(25px, 2.9vw, 38px));
+  vertical-align: top;
+}

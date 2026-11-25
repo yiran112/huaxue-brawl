@@ -3,7 +3,7 @@
 // 也能挂在独立的 Node 服务器上（见 server/index.js）。
 import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
-import { THEME_KEYS, LOOK_PRESETS, BOT_NAMES, MODE_KEYS, LENGTHS } from '../src/config.js';
+import { THEME_KEYS, LOOK_PRESETS, HATS, DEFAULT_HAT, BOT_NAMES, MODE_KEYS, LENGTHS } from '../src/config.js';
 import { GEAR_KEYS, GOGGLES, BACKS, SCARVES, TRAILS, pickBotGear } from '../src/gear.js';
 import { TRACK_MAP } from '../src/tracks.js';
 import { botWaitMs } from '../src/wait.js';
@@ -64,13 +64,12 @@ function cleanLook(look) {
   const l = look && typeof look === 'object' ? look : {};
   const color = (k) => int(l[k], 0, 0xffffff, d[k]);
   return {
-    hat: int(l.hat, 0, 7, d.hat),
+    hat: int(l.hat, 0, HATS.length - 1, d.hat),
     hatColor: color('hatColor'),
     skin: color('skin'),
     jacket: color('jacket'),
     stripe: color('stripe'),
     pants: color('pants'),
-    ski: color('ski'),
     mustache: !!l.mustache,
     gear: GEAR_KEYS.includes(l.gear) ? l.gear : 'ski',
     goggles: int(l.goggles, 0, GOGGLES.length - 1, 0),
@@ -170,7 +169,7 @@ export function attachMatchServer(httpServer, { path = '/ws', exclusive = false,
       p = null;
     }
     if (!p || !p.gearOwned(L.gear)) L.gear = 'ski';
-    if (!p || !p.hatOwned(L.hat)) L.hat = 0;
+    if (!p || !p.hatOwned(L.hat)) L.hat = DEFAULT_HAT;
     for (const slot of ['goggles', 'back', 'scarf', 'trail']) if (!p || !p.cosmeticOwned(slot, L[slot])) L[slot] = 0;
     if (p) c.up = p.up(L.gear);
   }

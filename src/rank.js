@@ -1,5 +1,6 @@
 // 排位：三种玩法共用一套段位。积分是这款游戏自己的规则，只借用「个人竞速 / 组队竞速 / 组队道具」的判胜方式。
 export const RANK_LV = 1;
+export const FIRST_WIN_BONUS = 8;
 
 export const RANK_MODES = [
   {
@@ -80,7 +81,7 @@ export function scoreRank(state, rep) {
   if (!win && delta < 0 && spec.id !== 'solo' && rep.mateLeft) delta = Math.ceil(delta / 2);
   const today = localDay();
   const first = win && state.day !== today;
-  if (first) delta += 8;
+  if (first) delta += FIRST_WIN_BONUS;
   if (delta < 0 && tier.index === 0) delta = 0;
   else if (delta < 0 && before - tier.min < 20) delta = Math.max(delta, tier.min - before);
   const after = Math.max(0, before + delta);

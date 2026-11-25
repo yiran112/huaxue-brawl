@@ -2,11 +2,13 @@
 import './quest.css';
 import { ACHIEVEMENTS, ACH_MAP, STAT_LABELS, CUP_LV, TASK_XP, TASK_COINS, TASK_PARTS, TASK_BONUS, TASK_BONUS_PARTS, seasonNow, seasonLeftText, seasonReward, blankSeason } from './profile.js';
 import { TRACK_MAP, CUPS } from './tracks.js';
-import { HATS, MODE_KEYS } from './config.js';
-import { GEAR, GEAR_KEYS, UP_KEYS, UP_MAX, HAT_UNLOCK, COSMETIC_SLOTS } from './gear.js';
+import { MODE_KEYS } from './config.js';
+import { GEAR, GEAR_KEYS, UP_KEYS, UP_MAX } from './gear.js';
 import { RANK_LV } from './rank.js';
 import { fmtTime } from './util.js';
 import { PART_ICON } from './ui/common.js';
+import { pageTop } from './ui/page-top.js';
+import { applyGameIcons } from './ui/web-icons.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -16,14 +18,6 @@ const short = (n) => {
   n = Number(n) || 0;
   return n >= 100000 ? `${(n / 10000).toFixed(n >= 1e6 ? 0 : 1)}万` : n.toLocaleString();
 };
-
-// 二级界面顶栏（放进 .ptop 里）：左上角返回，旁边标题，右上角雪花币。任务面板和大厅里点开的各个界面共用
-// parts：要显示改装币时传数量
-export function pageTop(title, coins, { act = 'back', sub = '', parts = null } = {}) {
-  return `<button class="pback" data-act="${act}"><kbd>Esc</kbd>返回</button>
-    <div class="ptitle"><span><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</span></div>
-    ${parts == null ? '' : `<div class="pcoin pparts">${PART_ICON} <b>${num(parts)}</b></div>`}<div class="pcoin">❄ <b>${num(coins)}</b></div>`;
-}
 
 // 每日任务：图标 + 一句怎么做
 const TASK_META = {
@@ -175,6 +169,7 @@ export class Quest {
     const P = this.ui.game.profile;
     this.el.innerHTML = `<header class="ptop">${pageTop('任务', P.coins, { act: 'close', sub: '每天回来看看 · 本地时间 0 点刷新' })}</header>
       <div class="qgrid">${this.dayHtml()}${this.weekHtml()}${this.nextHtml()}</div>`;
+    applyGameIcons(this.el);
     this.el.querySelectorAll('.qbody').forEach((x, i) => (x.scrollTop = tops[i] || 0));
     this.date = P.data.daily.date;
   }
@@ -360,13 +355,10 @@ export function growthView(ui) {
 }
 
 // 等级奖励轨道：每个有东西解锁的等级一格。[{ lv, items: [{ icon, name, buy }] }]
-const SLOT_ICON = { goggles: '🥽', back: '🎒', scarf: '🧣', trail: '🌈' };
 function levelRewards() {
   const out = {};
   const add = (u, icon, name) => u && u.lv > 1 && (out[u.lv] = out[u.lv] || []).push({ icon, name, buy: !!u.cost });
   for (const k of GEAR_KEYS) add(GEAR[k].unlock, GEAR[k].icon, GEAR[k].name);
-  HAT_UNLOCK.forEach((u, i) => add(u, '💇', HATS[i]));
-  for (const slot in COSMETIC_SLOTS) COSMETIC_SLOTS[slot].list.forEach((it) => add(it.unlock, SLOT_ICON[slot] || '🎁', it.name));
   CUPS.forEach((c, i) => add({ lv: CUP_LV[i] }, c.icon || '🏔️', `${c.name}赛道`));
   for (const id of ['lv10', 'lv20']) if (ACH_MAP[id]) add({ lv: +id.slice(2) }, '🏆', `成就「${ACH_MAP[id].name}」`);
   return Object.keys(out)
@@ -388,8 +380,23 @@ function trackHtml(info) {
         <b>${esc(a.name)}</b><small>${n.items.length > 1 ? `等 ${n.items.length} 样` : a.buy ? '解锁后购买' : '直接解锁'}</small>${st === 'got' ? '<em>✓</em>' : ''}</div>`;
     })
     .join('');
-  return `<div class="spick ltrack"><div class="lthead"><b>等级奖励</b></div>
-    <div class="glist ltlist" data-rank="lv" title="按住左右拖动，可以翻看更多等级">${cells}</div></div>`;
+  return `<div class="spick ltrack"><div class="lthead" id="level-rewards-title"><b>等级奖励</b></div>
+    <div class="ltlist" role="region" aria-labelledby="level-rewards-title" tabindex="0" title="按住左右拖动，可以翻看更多等级">${cells}</div></div>`;
+}
+
+export function bindLevelRewards(track) {
+  let drag = null;
+  track.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || track.scrollWidth <= track.clientWidth) return;
+    drag = { id: e.pointerId, x: e.clientX, left: track.scrollLeft };
+    track.setPointerCapture(e.pointerId);
+  });
+  track.addEventListener('pointermove', (e) => {
+    if (drag?.id === e.pointerId) track.scrollLeft = drag.left + drag.x - e.clientX;
+  });
+  track.addEventListener('lostpointercapture', (e) => {
+    if (drag?.id === e.pointerId) drag = null;
+  });
 }
 
 // 总览：右边是档案（等级、称号、生涯速览），角色脚下是等级奖励轨道。每日任务只在首页的任务面板里看

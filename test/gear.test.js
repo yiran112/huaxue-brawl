@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GEAR, GEAR_KEYS, STAT_MAX, FAIR_SUM, BOX_POOL, gearStats, fairStats, gearMods, uniformUp, pickBotGear, rollBox, unlockOf } from '../src/gear.js';
+import { DEFAULT_HAT, HATS } from '../src/config.js';
+import { GEAR, GEAR_KEYS, STAT_MAX, FAIR_SUM, COSMETIC_SLOTS, BOX_POOL, gearStats, fairStats, gearMods, uniformUp, pickBotGear, rollBox, unlockOf } from '../src/gear.js';
 import { mulberry32 } from '../src/util.js';
 
 const sum = (s) => Object.values(s).reduce((a, b) => a + b, 0);
@@ -45,12 +46,12 @@ test('机器人装备：简单难度不出 A / S', () => {
   }
 });
 
-test('补给箱：按权重抽档，奖池里的东西都能解锁', () => {
+test('补给箱：按权重抽档，覆盖全部可收集外观', () => {
   assert.equal(rollBox(() => 0).tier, 'C');
   assert.equal(rollBox(() => 0.999).tier, 'S');
   assert.equal(rollBox(() => 0.65).tier, 'A');
-  for (const it of BOX_POOL) {
-    const u = unlockOf(it.key);
-    assert.ok(u && !u.ach, `${it.key} 不该是成就奖励`);
-  }
+  const hats = HATS.map((_, i) => i).filter((i) => i !== DEFAULT_HAT).map((i) => `hat:${i}`);
+  const accessories = Object.entries(COSMETIC_SLOTS).flatMap(([slot, { list }]) => list.slice(1).map((_, i) => `${slot}:${i + 1}`));
+  assert.deepEqual(BOX_POOL.map(({ key }) => key).sort(), [...hats, ...accessories].sort());
+  for (const { key } of BOX_POOL) assert.deepEqual(unlockOf(key), { box: true }, key);
 });

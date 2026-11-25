@@ -1,7 +1,10 @@
 // 快捷表情：比赛里按 1~4（触屏点表情键）在自己头顶冒一个表情，联机时别人也看得到；机器人打中人、被打中时偶尔也会冒一个
 import * as THREE from 'three';
+import { gameIconImage, iconToken } from './icon-art.js';
 
-export const EMOTES = ['😂', '😎', '😡', '👍'];
+const EMOTE_ART = ['laugh', 'cool', 'angry', 'approve'];
+export const EMOTES = EMOTE_ART.map(iconToken);
+export const EMOTE_NAMES = ['大笑', '耍酷', '生气', '点赞'];
 const LIFE = 2.2;
 const COOL = 1.2; // 两次之间至少隔多久
 const SIZE = 1.6;
@@ -9,15 +12,11 @@ const tex = [];
 
 function emoteTex(i) {
   if (tex[i]) return tex[i];
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const ctx = c.getContext('2d');
-  ctx.font = '100px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(EMOTES[i], 64, 72);
-  const t = new THREE.CanvasTexture(c);
+  const t = new THREE.Texture();
   t.colorSpace = THREE.SRGBColorSpace;
+  const ready = (image) => { t.image = image; t.needsUpdate = true; };
+  const current = gameIconImage(EMOTE_ART[i], ready);
+  if (current) ready(current);
   return (tex[i] = t);
 }
 
@@ -26,6 +25,7 @@ export class Emotes {
     this.game = game;
     this.list = [];
     this.coolT = 0;
+    EMOTE_ART.forEach((_, i) => emoteTex(i));
   }
 
   // 本机玩家发一个
@@ -60,6 +60,7 @@ export class Emotes {
   show(r, i) {
     for (const e of this.list) if (e.r === r) e.t = 0;
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: emoteTex(i), transparent: true, depthWrite: false, fog: false }));
+    s.visible = !!s.material.map.image;
     s.renderOrder = 10;
     this.game.scene.add(s);
     this.list.push({ r, s, t: LIFE });
@@ -78,7 +79,7 @@ export class Emotes {
       }
       const age = LIFE - e.t;
       const pop = age < 0.16 ? (age / 0.16) * 1.25 : age < 0.3 ? 1.25 - ((age - 0.16) / 0.14) * 0.25 : 1;
-      e.s.visible = !this.game.replay.on;
+      e.s.visible = !!e.s.material.map.image && !this.game.replay.on;
       e.s.scale.setScalar(SIZE * pop);
       e.s.material.opacity = e.t < 0.35 ? e.t / 0.35 : 1;
       e.s.position.copy(e.r.pos);

@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { COL } from './fx.js';
 import { clamp } from './util.js';
+import { setGameText } from './ui/web-icons.js';
 
 const $ = (id) => document.getElementById(id);
 const _p = new THREE.Vector3();
@@ -112,7 +113,7 @@ export class RaceHud {
     }
     if (m.ic !== icon) {
       m.ic = icon;
-      m.icon.textContent = icon;
+      setGameText(m.icon, icon);
     }
     _p.copy(pos).project(this.game.camera);
     let x = _p.x;

@@ -16,9 +16,9 @@ export const shopMethods = {
   shopHtml() {
     // 记住这件，买下之后展台不会跳到下一件没买的
     const id = (this.shopGear = this.shopPick());
-    const nav = SHOW.shop.subs.map(([k, name, en]) => `<button class="${k === this.shopSec ? 'on' : ''}" data-act="ssec" data-id="${k}"><b>${name}</b><i>${en}</i></button>`).join('');
+    const nav = SHOW.shop.subs.map(([k, name, en]) => `<button aria-pressed="${k === this.shopSec}" data-act="ssec" data-id="${k}"><b>${name}</b><i>${en}</i></button>`).join('');
     const shelves = SHOW.shop.subs.slice(1).map(([r]) => this.shelfHtml(r, id)).join('');
-    return `<div class="sdrag" title="按住左右拖动，可以转动角色"></div><nav class="snav">${nav}</nav>
+    return `<div class="sdrag" title="按住左右拖动，可以转动角色"></div><nav class="snav side-nav" aria-label="商城分类">${nav}</nav>
       <div class="spick sbar">${this.boxWin ? this.boxWinHtml() : this.shopInfoHtml(id)}</div>
       <div class="sright shelfCol"><div class="shelf colBody">${this.boxHtml()}${shelves}</div></div>${this.boxFx && this.boxWin ? this.boxFxHtml() : ''}`;
   },
@@ -65,7 +65,7 @@ export const shopMethods = {
       const key = 'gear:' + id;
       const confirm = this.pendingBuy === key;
       state = P.coins < cost ? `还差 ❄${cost - P.coins}` : '可购买';
-      btn = `<button class="sbtn main ${confirm ? 'confirm' : ''} ${P.coins < cost ? 'poor' : ''}" data-act="buy" data-key="${key}" data-field="gear" data-v="${id}"><b>${confirm ? '确认购买' : '购买'}</b><i>❄ ${cost}</i></button>`;
+      btn = `<button class="sbtn main ${confirm ? 'confirm' : ''} ${P.coins < cost ? 'poor' : ''}" data-act="buy" data-key="${key}" data-v="${id}"><b>${confirm ? '确认购买' : '购买'}</b><i>❄ ${cost}</i></button>`;
     }
     const cmp = id === cur ? '' : `<em>属性右上角是和正在用的「${esc((GEAR[cur] || GEAR.ski).name)}」（含改装）相比</em>`;
     return `<div class="sihead"><div class="sbadge">${G.icon}</div>
@@ -101,7 +101,7 @@ export const shopMethods = {
     }
     return `<section class="shsec" data-sec="box"><header class="shhead"><b>雪花补给箱</b><span>已收集 ${got} / ${BOX_POOL.length}</span></header>
       <div class="boxban"><div class="bart"><span>🎁</span></div>
-        <div class="btx"><b class="bttl">开箱惊喜</b><small>随机开出一件外观，重复的返还 ❄${BOX_REFUND}</small><div class="bodds">${odds}</div>${btn}</div></div></section>`;
+        <div class="btx"><b class="bttl">外观抽奖</b><small>随机开出一件外观，重复的返还 ❄${BOX_REFUND}</small><div class="bodds">${odds}</div>${btn}</div></div></section>`;
   },
 
   // 一档稀有度的货架：白底商品卡排成格子，右下角一条黄色斜切价签
@@ -135,7 +135,7 @@ export const shopMethods = {
     if (el.scrollHeight > el.clientHeight && el.scrollTop + el.clientHeight >= el.scrollHeight - 4) cur = secs[secs.length - 1].dataset.sec;
     if (cur === this.shopSec && !force) return;
     this.shopSec = cur;
-    for (const b of $('tab-shop').querySelectorAll('.snav button')) b.classList.toggle('on', b.dataset.id === cur);
+    for (const b of $('tab-shop').querySelectorAll('.snav button')) b.setAttribute('aria-pressed', String(b.dataset.id === cur));
   },
 
   // 把货架滚到某一区（顶对齐）或某张卡片（居中）。窄窗口下货架不单独滚动，滚的是整页

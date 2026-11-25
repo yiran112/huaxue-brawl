@@ -57,8 +57,8 @@ export function ribbon(ui, label, box, action, { sub = '', primary = false, mute
   hit(ui, box, label, action, primary);
 }
 
-export function pageHeader(ui, title, back = () => ui.back(), { sub = '', parts = false } = {}) {
-  const { l, r, t } = ui;
+export function pageHeader(ui, title, back = () => ui.back(), { sub = '', parts = false, action = null, meta = null } = {}) {
+  const { l, t } = ui;
   const p = ui.game.profile;
   const button = { x: l, y: t + 6, w: 96, h: 35 };
   ui.panel(button.x, button.y + 3, button.w, button.h, 'rgba(11,21,48,.4)', 20, null);
@@ -71,8 +71,22 @@ export function pageHeader(ui, title, back = () => ui.back(), { sub = '', parts 
   ui.text(title, l + 135, t + 23, { bold: true, italic: true, size: 23, max: w - 24 });
   if (sub) ui.text(sub, l + 144 + title.length * 23, t + 26, { bold: true, size: 13, max: sub.length * 12 + 10 });
   const right = ui.headerRight(t + 23);
-  chip(ui, `❄ ${p.coins}`, { x: right - 85, y: t + 5, w: 85, h: 36 }, null, { active: true, size: 18, radius: 20 });
-  if (parts) chip(ui, `⬢ ${p.parts}`, { x: right - 201, y: t + 5, w: 89, h: 36 }, null, { active: true, size: 18, radius: 20 });
+  const coins = { x: right - 85, y: t + 5, w: 85, h: 36 };
+  chip(ui, `❄ ${p.coins}`, coins, null, { active: true, size: 18, radius: 20 });
+  const partsX = right - 201;
+  if (parts) chip(ui, `⬢ ${p.parts}`, { ...coins, x: partsX, w: 89 }, null, { active: true, size: 18, radius: 20 });
+  let actionsLeft = parts ? partsX : coins.x;
+  if (action) {
+    const width = 86;
+    actionsLeft -= width + 8;
+    chip(ui, action.label, { ...coins, x: actionsLeft, w: width }, action.onClick, { size: 14, radius: 20 });
+  }
+  if (meta) {
+    const x = l + 112 + w + 16;
+    const max = Math.max(0, actionsLeft - x - 12);
+    ui.text(meta.title, x, t + 14, { size: 16, bold: true, max });
+    ui.text(meta.detail, x, t + 33, { size: 12, color: PALE, max });
+  }
   return t + 55;
 }
 

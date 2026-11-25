@@ -3,7 +3,7 @@
 // 服务器在自己那份存档上用同一套规则（src/profile.js）重做一遍；钱不够、没解锁之类不合规矩的操作直接跳过。
 // 比赛成绩仍然是客户端报的，这里只能把每项卡在一局正常比赛能达到的范围里。
 import { Profile, sanitizeProfile, ACHIEVEMENTS } from '../src/profile.js';
-import { GEAR, UP_KEYS, unlockOf } from '../src/gear.js';
+import { GEAR, UP_KEYS } from '../src/gear.js';
 import { MODE_KEYS } from '../src/config.js';
 import { RANK_MAP } from '../src/rank.js';
 import { TRACK_MAP } from '../src/tracks.js';
@@ -65,8 +65,7 @@ export function replayOps(base, ops, seasonRank = () => 0) {
     switch (o.op) {
       case 'buy': {
         const key = typeof o.key === 'string' ? o.key.slice(0, 24) : '';
-        const u = unlockOf(key);
-        if (u) p.buy(u, key);
+        p.buy(key);
         break;
       }
       case 'up':

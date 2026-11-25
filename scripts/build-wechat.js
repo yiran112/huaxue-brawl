@@ -19,6 +19,7 @@ if (apiOrigin && !/^https:\/\/[a-z0-9.-]+$/i.test(apiOrigin)) {
 }
 
 const files = new Map();
+const icons = (await readdir(resolve(root, 'public/art/icons'))).filter((name) => /^[a-z0-9-]+\.png$/.test(name));
 const subpackages = ['music-classic', 'music-alpine', 'music-expedition'].map((name) => ({ name, root: name }));
 const tracks = await readdir(resolve(root, 'src/music/tracks'));
 for (const [i, track] of tracks.entries()) {
@@ -61,6 +62,7 @@ await build({
         dest, bytes: await readFile(resolve(root, 'src', src)),
       })));
       for (const { dest, bytes } of audio) emit(dest, bytes);
+      for (const name of icons) emit(`art/icons/${name}`, await readFile(resolve(root, 'public/art/icons', name)));
       for (const { root: folder } of subpackages) emit(folder + '/game.js', '// 配乐资源分包\n');
       emit('game.json', json({ deviceOrientation: 'landscape', showStatusBar: false, subpackages }));
       emit('project.config.json', json({

@@ -1,7 +1,8 @@
 // 匹配和房间等待界面
 import { MODES } from '../config.js';
-import { pageTop } from '../quest.js';
+import { pageTop } from './page-top.js';
 import { $, hex, esc } from './common.js';
+import { setGameHtml, setGameText } from './web-icons.js';
 
 export const matchMethods = {
   copyInvite() {
@@ -42,7 +43,7 @@ export const matchMethods = {
     const status = $('matchStatus');
     const room = info.kind === 'room' || this.game.customRoom;
     status.classList.toggle('bad', !!info.error);
-    $('matchTop').innerHTML = pageTop(room ? '房间' : '匹配对战', this.game.profile.coins);
+    setGameHtml($('matchTop'), pageTop(room ? '房间' : '匹配对战', this.game.profile.coins));
     const note = $('matchNote');
     if (note) note.textContent = room ? '按房主选的玩法和赛道。空位可以继续进人，房主点开始后由机器人补齐。' : `${MODES[this.game.soloRules.mode] ? MODES[this.game.soloRules.mode].name : '道具赛'}，中等长度、随机场景。在线只有你时约 10 秒补机器人，人多最多等 30 秒；满员会提前开。比赛中途不能暂停。`;
     const go = $('btnStartNow');
@@ -50,7 +51,7 @@ export const matchMethods = {
     this.roomId = room && info.players && info.id ? info.id : 0;
     $('btnInvite').classList.toggle('hidden', !this.roomId);
     if (!info.players) {
-      status.textContent = info.status || '';
+      setGameText(status, info.status || '');
       list.innerHTML = '';
       go.classList.add('hidden');
       this.matchText = null;
@@ -59,13 +60,13 @@ export const matchMethods = {
     const n = info.players.length;
     this.matchReason = info.reason || (room ? 'host' : 'fill');
     this.matchText = room ? `房间里 ${n} / ${info.max} 人` : `已匹配 ${n} / ${info.max} 人`;
-    status.textContent = this.matchText;
+    setGameText(status, this.matchText);
     const wait = this.matchReason === 'host' ? '等待玩家…' : '等待玩家…（到点由机器人补位）';
     let html = info.players
       .map((p) => `<div class="row ${p.id === info.me ? 'me' : ''}"><span class="dot" style="background:${hex(p.look.jacket)}"></span><span class="nm">${esc(p.name)}</span><span>${p.id === info.me ? '你' : ''}</span></div>`)
       .join('');
     for (let i = n; i < info.max; i++) html += `<div class="row empty"><span class="dot"></span><span class="nm">${wait}</span></div>`;
-    list.innerHTML = html;
+    setGameHtml(list, html);
     go.classList.toggle('hidden', !info.host);
   },
 
@@ -89,7 +90,7 @@ export const matchMethods = {
       if (!show) return;
       el = document.createElement('div');
       el.id = 'queuePill';
-      el.innerHTML = '<button type="button" class="qpGo"><i>⏳</i><b></b><small></small></button><button type="button" class="qpX">取消</button>';
+      setGameHtml(el, '<button type="button" class="qpGo"><i>⏳</i><b></b><small></small></button><button type="button" class="qpX">取消</button>');
       el.addEventListener('click', (e) => {
         if (e.target.closest('.qpX')) return g.leavePublicQueue();
         if (!e.target.closest('.qpGo')) return;

@@ -1,0 +1,65 @@
+.side-nav {
+  min-width: 0;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid #8badde48;
+  border-radius: 9px;
+  background: #101d39ed;
+  scrollbar-width: thin;
+  scrollbar-color: #6584b4 transparent;
+}
+
+.side-nav-heading {
+  padding: 7px 12px;
+  color: #b5cae8;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.side-nav :where(button) {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  min-height: 40px;
+  padding: 7px 12px;
+  border-radius: 5px;
+  color: #dbeaff;
+  background: none;
+  font-size: clamp(14px, 1.2vw, 17px);
+  font-weight: 800;
+  text-align: left;
+}
+
+.side-nav :where(button)::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: #75a6f31a;
+  pointer-events: none;
+}
+
+.side-nav :where(button:hover)::before { background: #75a6f334; }
+.side-nav :where(button:active)::before { filter: brightness(.91); }
+.side-nav :where(button:focus-visible) { outline: 2px solid #8ee3ff; outline-offset: -2px; }
+
+.side-nav :where(button[aria-pressed="true"], button[aria-current="true"]) { color: #102444; }
+.side-nav :where(button[aria-pressed="true"], button[aria-current="true"])::before {
+  border-radius: 5px 0 0 5px;
+  background: linear-gradient(90deg, #eef9ff, #a9ccf9);
+  box-shadow: inset 3px 0 #76d8ff;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+.side-nav :where(small, button > i) {
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  opacity: .78;
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .side-nav { padding: 5px; }
+  .side-nav :where(button) { min-height: 32px; padding-block: 5px; }
+}

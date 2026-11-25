@@ -3,6 +3,7 @@ import { SKINS } from '../config.js';
 import { TEAM_COLORS } from '../modes.js';
 import { $, hex, esc, PART_ICON } from './common.js';
 import { PodiumView } from './podium3d.js';
+import { setGameText, setGameHtml } from './web-icons.js';
 
 export const resultsMethods = {
   hideResults() {
@@ -50,8 +51,8 @@ export const resultsMethods = {
 
   showResults(data) {
     // data: { title, sub, rows: [{rank,name,me,idx,look,time,pts,team}], nextLabel, reward, backLabel, awards: [{icon,name,who,me,idx,val}] }
-    $('resTitle').textContent = data.title;
-    $('resSub').textContent = data.sub;
+    setGameText($('resTitle'), data.title);
+    setGameText($('resSub'), data.sub);
     // 有三个以上带造型的名次：前三名站上领奖台（第二、第一、第三从左到右），下面是「本局之最」，再往下从第四名列起
     const awards = data.awards || [];
     const podium = data.rows.length >= 3 && data.rows.slice(0, 3).every((r) => r.look);
@@ -70,7 +71,7 @@ export const resultsMethods = {
       .join('');
     // 联机结算每半秒刷新一次，内容没变就不重画，免得领奖台的入场动画一遍遍重播
     if (this.resHtml !== html) {
-      $('resList').innerHTML = html;
+      setGameHtml($('resList'), html);
       if (podium) this.bindPodium(data.rows);
       else if (this.podium3d) this.podium3d.clear();
     }
@@ -78,7 +79,7 @@ export const resultsMethods = {
     const rw = $('resReward');
     if (data.reward) {
       this.lastReward = data.reward;
-      rw.innerHTML = this.rewardHtml(data.reward);
+      setGameHtml(rw, this.rewardHtml(data.reward));
     }
     rw.classList.toggle('hidden', !data.reward);
     const swap = $('btnPracticeSwap');

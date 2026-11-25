@@ -10,6 +10,7 @@ const H = 15; // 展厅高度
 export const STAGE_TOP = 0.34; // 展台台面离地高度
 // 角色默认朝向：面对镜头（镜头在 +Z 一侧），再侧过去一点
 const FACE = Math.PI - 0.62;
+const WARDROBE_ANGLE = { front: Math.PI - 0.25, back: -0.32 };
 // 车库里只摆装备时：侧得更多（看得到整条板），最长的一边放大到 GEAR_SIZE 米，
 // 往镜头这边倾 GEAR_TILT，板面上的图案看得清；悬多高按装备的样子算（见 placeGear），上下浮动 GEAR_BOB
 const GEAR_FACE = Math.PI - 1.05;
@@ -271,7 +272,14 @@ export class Showroom {
     this.holoTex.needsUpdate = true;
   }
 
-  // 鼠标左右拖动：转动角色
+  // 切换装扮部位时转到对应方向，同一部位内保留手动旋转的角度。
+  setView(view) {
+    if (view === this.view) return;
+    this.view = view;
+    this.yaw = 0;
+    this.holo.visible = !view;
+  }
+
   drag(dx) {
     this.yaw += dx * 0.012;
   }
@@ -287,7 +295,7 @@ export class Showroom {
       this.turn.rotation.y = this.spinner.rotation.y;
     } else {
       if (this.skier) this.skier.update(dt, { grounded: true, speed: 0, steer: Math.sin(t * 0.7) * 0.16 });
-      this.turn.rotation.y = FACE + this.yaw + Math.sin(t * 0.4) * 0.1;
+      this.turn.rotation.y = (WARDROBE_ANGLE[this.view] ?? FACE) + this.yaw + Math.sin(t * 0.4) * 0.1;
     }
     this.holo.material.opacity = 0.8 + Math.sin(t * 2.1) * 0.06 + (Math.sin(t * 23) > 0.96 ? -0.25 : 0);
     this.ring.material.opacity = 0.7 + Math.sin(t * 1.6) * 0.25;

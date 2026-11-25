@@ -15,6 +15,9 @@ export const RARITY = {
 export const RARITY_KEYS = ['C', 'B', 'A', 'S'];
 export const rarityRank = (r) => (RARITY[r] ? RARITY[r].order : 0);
 
+// 装备板身的颜色：做模型时就是这个颜色，玩家不能改，每个人看到的同一件装备都一样
+export const GEAR_COLOR = 0xf4f4f4;
+
 // form：滑法和站姿（ski 双板 / board 单板 / sled 坐着的雪橇 / tube 坐着的雪圈）
 // model：用 gearModels.js 里的哪一套模型（每件装备一套独立造型）
 // trim：装饰色。unlock：{ lv } 到等级自动解锁；{ cost } 花雪花币购买；{ lv, cost } 到等级后才能购买；
@@ -79,16 +82,16 @@ export const STAT_MAX = 6.5;
 // 左列操控、中列竞速、右列防护。col 是第几列，need 是要先改满的上一个节点。
 // 每个节点 0~3 级；add 是每级加的属性，fx 是每级加的特殊效果（见 TUNE_FX）
 export const UPGRADES = {
-  core: { name: '核心调校', icon: '⚙️', col: 1, row: 0, add: { speed: 0.05, accel: 0.05, turn: 0.05, air: 0.05, tough: 0.05 } },
-  bind: { name: '固定器调校', icon: '🔩', col: 0, row: 1, need: 'core', add: { turn: 0.2 } },
-  flex: { name: '板身弹性', icon: '🌀', col: 0, row: 2, need: 'bind', add: { air: 0.2, turn: 0.1 } },
-  charge: { name: '集气芯片', icon: '🔋', col: 0, row: 3, need: 'flex', fx: { gain: 0.05 } },
-  wax: { name: '板底打蜡', icon: '🕯️', col: 1, row: 1, need: 'core', add: { speed: 0.2 } },
-  edge: { name: '钢边打磨', icon: '⚡', col: 1, row: 2, need: 'wax', add: { speed: 0.15, accel: 0.1 } },
-  jet: { name: '氮气喷管', icon: '🚀', col: 1, row: 3, need: 'edge', fx: { nitro: 0.05 } },
-  pad: { name: '护具升级', icon: '⛑️', col: 2, row: 1, need: 'core', add: { tough: 0.2 } },
-  brace: { name: '减震支架', icon: '🦾', col: 2, row: 2, need: 'pad', add: { tough: 0.15, accel: 0.1 } },
-  guard: { name: '护盾强化', icon: '🛡️', col: 2, row: 3, need: 'brace', fx: { shield: 1 } },
+  core: { name: '核心调校', col: 1, row: 0, add: { speed: 0.05, accel: 0.05, turn: 0.05, air: 0.05, tough: 0.05 } },
+  bind: { name: '固定器调校', col: 0, row: 1, need: 'core', add: { turn: 0.2 } },
+  flex: { name: '板身弹性', col: 0, row: 2, need: 'bind', add: { air: 0.2, turn: 0.1 } },
+  charge: { name: '集气芯片', col: 0, row: 3, need: 'flex', fx: { gain: 0.05 } },
+  wax: { name: '板底打蜡', col: 1, row: 1, need: 'core', add: { speed: 0.2 } },
+  edge: { name: '钢边打磨', col: 1, row: 2, need: 'wax', add: { speed: 0.15, accel: 0.1 } },
+  jet: { name: '氮气喷管', col: 1, row: 3, need: 'edge', fx: { nitro: 0.05 } },
+  pad: { name: '护具升级', col: 2, row: 1, need: 'core', add: { tough: 0.2 } },
+  brace: { name: '减震支架', col: 2, row: 2, need: 'pad', add: { tough: 0.15, accel: 0.1 } },
+  guard: { name: '护盾强化', col: 2, row: 3, need: 'brace', fx: { shield: 1 } },
 };
 export const UP_KEYS = Object.keys(UPGRADES);
 export const UP_MAX = 3;
@@ -185,39 +188,37 @@ export const uniformUp = (lv) => Object.fromEntries(UP_KEYS.map((k) => [k, lv]))
 
 // ---------- 外观部件 ----------
 // 下标 0 一律是“无 / 默认”，不需要解锁
-export const HAT_UNLOCK = [null, null, null, null, { lv: 4 }, { lv: 7 }, { cost: 800 }, { lv: 12 }];
-
 export const GOGGLES = [
   { name: '无' },
   { name: '橙色雪镜' },
-  { name: '酷炫墨镜', unlock: { lv: 2 } },
-  { name: '心形眼镜', unlock: { cost: 600 } },
-  { name: '电竞护目镜', unlock: { ach: 'win10' } },
+  { name: '酷炫墨镜' },
+  { name: '心形眼镜' },
+  { name: '电竞护目镜' },
 ];
 
 export const BACKS = [
   { name: '无' },
   { name: '双肩包' },
-  { name: '超人披风', unlock: { lv: 5 } },
-  { name: '火箭背包', unlock: { cost: 1200 } },
-  { name: '天使翅膀', unlock: { lv: 15 } },
-  { name: '冠军奖杯', unlock: { ach: 'cupAll' } },
+  { name: '超人披风' },
+  { name: '火箭背包' },
+  { name: '天使翅膀' },
+  { name: '冠军奖杯' },
 ];
 
 export const SCARVES = [
   { name: '无' },
-  { name: '短围巾', unlock: { lv: 1 } },
-  { name: '长围巾', unlock: { cost: 400 } },
+  { name: '短围巾' },
+  { name: '长围巾' },
 ];
 
 // color：null 表示跟随场景的默认滑痕颜色；'rainbow' 是彩虹渐变
 export const TRAILS = [
   { name: '默认', color: null },
-  { name: '冰蓝', color: 0x3fc8ff, unlock: { lv: 2 } },
-  { name: '烈焰', color: 0xff6a1f, unlock: { cost: 500 } },
-  { name: '樱粉', color: 0xff5fc8, unlock: { lv: 8 } },
-  { name: '黄金', color: 0xffc81f, unlock: { ach: 'gold1' } },
-  { name: '彩虹', color: 'rainbow', unlock: { lv: 20 } },
+  { name: '冰蓝', color: 0x3fc8ff },
+  { name: '烈焰', color: 0xff6a1f },
+  { name: '樱粉', color: 0xff5fc8 },
+  { name: '黄金', color: 0xffc81f },
+  { name: '彩虹', color: 'rainbow' },
 ];
 
 // 外观槽位：look 里的字段名 → 选项列表
@@ -231,18 +232,9 @@ export const COSMETIC_SLOTS = {
 // look 里装备 / 外观字段的默认值
 export const LOOK_EXTRA_DEFAULTS = { gear: 'ski', goggles: 0, back: 0, scarf: 0, trail: 0 };
 
-// 存档 key（'gear:sled'、'hat:6'、'back:3'）对应的解锁条件
-export function unlockOf(key) {
-  const [slot, id] = String(key).split(':');
-  if (slot === 'gear') return GEAR[id] && GEAR[id].unlock;
-  if (slot === 'hat') return HAT_UNLOCK[+id];
-  const s = COSMETIC_SLOTS[slot];
-  return s && s.list[+id] && s.list[+id].unlock;
-}
-
 // ---------- 雪花补给箱 ----------
 // 花雪花币随机开一件外观：先按权重抽档次（稀有度沿用装备的 C / A / S），再在这一档里随便挑一件。
-// 成就奖励的外观不放进来；开出已经有的，折回 BOX_REFUND 雪花币
+// 所有可收集的外观都在这里；开出已经有的，折回 BOX_REFUND 雪花币
 export const BOX_COST = 600;
 export const BOX_REFUND = 300;
 export const BOX_WEIGHT = { C: 60, A: 30, S: 10 };
@@ -253,15 +245,34 @@ export const BOX_POOL = [
   { key: 'hat:4', tier: 'C' },
   { key: 'trail:2', tier: 'C' },
   { key: 'goggles:3', tier: 'C' },
+  { key: 'hat:0', tier: 'C' },
+  { key: 'hat:1', tier: 'C' },
+  { key: 'hat:2', tier: 'C' },
+  { key: 'hat:3', tier: 'C' },
+  { key: 'goggles:1', tier: 'C' },
+  { key: 'back:1', tier: 'C' },
+  { key: 'scarf:1', tier: 'C' },
   { key: 'back:2', tier: 'A' },
   { key: 'hat:5', tier: 'A' },
   { key: 'hat:6', tier: 'A' },
   { key: 'trail:3', tier: 'A' },
+  { key: 'goggles:4', tier: 'A' },
+  { key: 'trail:4', tier: 'A' },
   { key: 'back:3', tier: 'S' },
   { key: 'hat:7', tier: 'S' },
   { key: 'back:4', tier: 'S' },
   { key: 'trail:5', tier: 'S' },
+  { key: 'back:5', tier: 'S' },
 ];
+const BOX_KEYS = new Set(BOX_POOL.map(({ key }) => key));
+const BOX_UNLOCK = { box: true };
+
+// 存档 key（'gear:sled'、'hat:6'、'back:3'）对应的解锁条件
+export function unlockOf(key) {
+  if (BOX_KEYS.has(key)) return BOX_UNLOCK;
+  const [slot, id, extra] = String(key).split(':');
+  if (slot === 'gear' && extra === undefined) return GEAR[id]?.unlock;
+}
 
 export function rollBox(rng = Math.random) {
   const tiers = Object.keys(BOX_WEIGHT);
@@ -274,6 +285,7 @@ export function rollBox(rng = Math.random) {
 // 解锁条件的文字说明
 export function unlockText(u) {
   if (!u) return '';
+  if (u.box) return '雪花补给箱抽奖';
   const parts = [];
   if (u.lv) parts.push(`Lv.${u.lv}`);
   if (u.cost) parts.push(`❄${u.cost}`);

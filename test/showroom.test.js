@@ -15,7 +15,7 @@ const ctx = new Proxy({}, {
 });
 globalThis.document = { createElement: () => ({ width: 0, height: 0, style: {}, getContext: () => ctx }) };
 
-const { GEAR_KEYS } = await import('../src/gear.js');
+const { GEAR_KEYS, GEAR_COLOR } = await import('../src/gear.js');
 const { makeGearPreview } = await import('../src/gearThumb.js');
 const { placeGear, GEAR_TILT, GEAR_BOB, GEAR_CLEAR } = await import('../src/showroom.js');
 
@@ -47,6 +47,20 @@ test('车库只摆装备：倾过来转一整圈、浮到最低也不穿进展�
     }
     assert.ok(lift - GEAR_BOB + lo >= GEAR_CLEAR - 1e-6, `${id} 最低点离台面只有 ${(lift - GEAR_BOB + lo).toFixed(3)} 米`);
     assert.ok(lift + GEAR_BOB + hi <= top + 1e-6, `${id} 最高点 ${(lift + GEAR_BOB + hi).toFixed(3)} 超过 top ${top.toFixed(3)}`);
+    skier.dispose();
+  }
+});
+
+test('装备颜色是做好的：老存档里玩家选的装备颜色不起作用', () => {
+  const odd = 0x123456;
+  for (const id of ['ski', 'hover', 'bike']) {
+    const { root, skier } = makeGearPreview(id, { ski: odd });
+    const colors = new Set();
+    root.traverse((o) => {
+      if (o.isMesh) for (const m of [].concat(o.material)) if (m.color) colors.add(m.color.getHex());
+    });
+    assert.ok(!colors.has(odd), `${id} 还在用玩家选的颜色`);
+    assert.ok(colors.has(GEAR_COLOR), `${id} 板身不是 GEAR_COLOR`);
     skier.dispose();
   }
 });

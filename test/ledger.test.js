@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Profile, sanitizeProfile, xpNeed, rankSeasonNow, ACHIEVEMENTS } from '../src/profile.js';
-import { GEAR, BOX_COST } from '../src/gear.js';
+import { GEAR, BOX_COST, BOX_POOL } from '../src/gear.js';
 import { TRACKS } from '../src/tracks.js';
 import { replayOps, mergeClient, sanitizeRep, settle } from '../server/ledger.js';
 
@@ -79,6 +79,19 @@ test('补给箱：同一个种子，浏览器和服务器开出一样的东西',
   assert.deepEqual(Object.keys(d.owned).sort(), Object.keys(p.data.owned).sort());
 });
 
+test('补给箱外观：服务器仅通过开箱操作增加收藏', () => {
+  const base = sanitizeProfile({ coins: 10000, boxSeed: 123456, owned: { 'hat:6': true } });
+  const ops = BOX_POOL.map(({ key }) => ({ op: 'buy', key }));
+  const profile = { owned: Object.fromEntries(BOX_POOL.map(({ key }) => [key, true])) };
+  const saved = settle(clone(base), { ops, profile });
+  assert.deepEqual(saved.owned, base.owned);
+  assert.equal(saved.coins, base.coins);
+  const drawn = settle(clone(base), { ops: [...ops, { op: 'box' }], profile });
+  assert.equal(drawn.boxN, 1);
+  assert.equal(drawn.coins, base.coins - BOX_COST);
+  assert.equal(Object.keys(drawn.owned).length, 2);
+});
+
 test('成绩单：每项卡在一局能达到的范围里', () => {
   const r = sanitizeRep({ hits: 1e9, field: 99, rank: 50, kind: 'cheat', mode: 'x', track: 'nope', length: 1e6, extra: [{ coins: 1e6 }] });
   assert.equal(r.hits, 60);
@@ -125,7 +138,7 @@ test('正常玩：服务器重算出来的存档和浏览器一致', () => {
   p.upgrade('ski', 'core');
   p.openBox();
   p.applyRace(raceRep({ mode: 'brawl', rank: 1, hits: 7 }));
-  p.buy(GEAR.wood.unlock, 'gear:wood');
+  p.buy('gear:wood');
   const d = settle(clone(start), { profile: p.data, ops });
   const c = sanitizeProfile(p.data);
   for (const k of ['coins', 'parts', 'xp', 'owned', 'up', 'boxN', 'modes', 'stats', 'season']) assert.deepEqual(d[k], c[k], k);

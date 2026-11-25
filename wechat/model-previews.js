@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { frameGearPreview, makeGearPreview } from '../src/gearThumb.js';
+import { appearancePreviewKey, frameGearPreview, makeAppearancePreview, makeGearPreview } from '../src/gearThumb.js';
 import { PodiumView } from '../src/ui/podium3d.js';
 
 function stage(gear) {
@@ -17,25 +17,25 @@ export class ModelPreviews {
     this.podiumScene = stage(false);
     this.podiumCamera = new THREE.PerspectiveCamera(26, 1, 0.1, 80);
     this.podium = new PodiumView();
-    this.gear = new Map();
+    this.cards = new Map();
     this.slots = new Map();
     this.size = new THREE.Vector2();
     this.last = Date.now();
   }
 
-  gearModel(id, look) {
-    const key = id + ':' + look.ski;
-    if (this.gear.has(key)) return this.gear.get(key);
-    const result = makeGearPreview(id, look);
+  cardModel({ gear, appearance }, look) {
+    const key = appearance ? `${appearance.field}:${appearance.value}:${appearancePreviewKey(appearance.field, look)}` : `gear:${gear}`;
+    if (this.cards.has(key)) return this.cards.get(key);
+    const result = appearance ? makeAppearancePreview(appearance.field, appearance.value, look) : makeGearPreview(gear, look);
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
-    frameGearPreview(camera, result.root);
+    frameGearPreview(camera, result.root, result.view);
     const model = { ...result, camera };
-    if (this.gear.size >= 12) {
-      const oldest = this.gear.keys().next().value;
-      this.gear.get(oldest).skier.dispose();
-      this.gear.delete(oldest);
+    if (this.cards.size >= 32) {
+      const oldest = this.cards.keys().next().value;
+      this.cards.get(oldest).skier.dispose();
+      this.cards.delete(oldest);
     }
-    this.gear.set(key, model);
+    this.cards.set(key, model);
     return model;
   }
 
@@ -78,7 +78,7 @@ export class ModelPreviews {
         renderer.setViewport(box.x * s, (ui.h - box.y - box.h) * s, box.w * s, box.h * s);
         renderer.setScissor(clip.x * s, (ui.h - clip.y - clip.h) * s, clip.w * s, clip.h * s);
         renderer.clearDepth();
-        const model = slot || this.gearModel(box.gear, ui.game.look);
+        const model = slot || this.cardModel(box, ui.game.look);
         const scene = slot ? this.podiumScene : this.gearScene;
         if (slot) {
           this.podium.pose(slot, dt);

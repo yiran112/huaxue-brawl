@@ -1,0 +1,76 @@
+#menu.ranked-open { padding: 0; overflow: hidden; }
+.ranked-open #menuMid { position: absolute; inset: 0; z-index: 4; }
+.ranked-open #menuToast { top: 70px; bottom: auto; }
+.ranked-screen { position: absolute; z-index: 1; inset: 0; isolation: isolate; overflow: hidden;
+  display: grid; grid-template-columns: clamp(100px, 12vw, 168px) minmax(0, 1fr) clamp(220px, 28vw, 390px);
+  grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px clamp(12px, 2vw, 28px);
+  padding: var(--page-top) var(--page-right) max(14px, env(safe-area-inset-bottom)) var(--page-left);
+  color: #eef6ff; background: #111d42; }
+.ranked-art { position: absolute; z-index: -1; inset: 0; background: linear-gradient(#172952, #243366 58%, #162748); }
+.ranked-art svg { display: block; width: 100%; height: 100%; }
+.ranked-art::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, #0b1635f5, #142243c9 32%, #1527512e 78%), linear-gradient(0deg, #111b38 4%, #101b387d 26%, transparent 75%); }
+.ranked-head { grid-area: 1 / 1 / 2 / 4; }
+.ranked-nav { grid-area: 2 / 1; display: grid; align-self: start; }
+.ranked-hero { grid-area: 2 / 2; align-self: center; justify-self: center; width: min(100%, 310px); display: grid; justify-items: center; text-shadow: 0 2px 8px #0a132b; }
+.ranked-hero canvas { display: block; width: min(43vh, 236px); max-width: 95%; aspect-ratio: 1; margin: max(-27px, -4vh) 0 max(-19px, -3vh); }
+.ranked-hero h1 { margin: 0; color: var(--medal); font-size: clamp(25px, 5vh, 45px); line-height: 1.1; }
+.ranked-stars { color: #ffde85; min-height: 14px; letter-spacing: 3px; }
+.ranked-points { display: flex; gap: 7px; align-items: baseline; }
+.ranked-points b { font-size: clamp(24px, 5vh, 42px); font-style: italic; }
+.ranked-points span, .ranked-hero small { color: #c8dbf4; }
+.ranked-meter { width: min(80%, 230px); height: 6px; margin: 3px 0 7px; overflow: hidden; border-radius: 4px; background: #080e2caa; box-shadow: 0 0 0 1px #abcafa55; }
+.ranked-meter i { display: block; height: 100%; background: linear-gradient(90deg, #81ccff, #b8f3ff); }
+.ranked-summary { grid-area: 2 / 3; display: grid; gap: 7px; align-self: end; }
+.ranked-summary article { min-width: 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 12px;
+  border: 1px solid #94b8ef67; border-left: 3px solid #86ccff; border-radius: 5px; background: linear-gradient(90deg, #1e3158f5, #1d2d52d9); }
+.ranked-summary article b, .ranked-summary article span { display: block; }
+.ranked-summary article span { color: #c2d9f4; font-size: 12px; }
+.ranked-summary article strong { color: #ffdb87; font-size: clamp(18px, 3vh, 28px); white-space: nowrap; }
+.ranked-summary article strong small { color: #eff7ff; font-size: 12px; }
+.ranked-footer { grid-area: 3 / 1 / 4 / 4; min-width: 0; display: grid; grid-template-columns: minmax(150px, .9fr) minmax(0, 2.4fr) minmax(118px, .75fr); align-items: stretch; gap: 9px; }
+.ranked-mode-info { display: grid; align-content: center; padding: 4px 10px; border-left: 3px solid #8acfff; color: #eff7ff; background: #1b2c50d9; }
+.ranked-mode-info small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bcd3ef; font-size: 11px; }
+.ranked-modes { min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.ranked-modes button, .ranked-play { min-height: 46px; padding: 4px; border: 1px solid #8eaee5a8; border-radius: 7px; background: linear-gradient(180deg, #344f82, #233963); font-size: clamp(13px, 1.65vw, 20px); font-weight: 850; white-space: nowrap; }
+.ranked-modes button.current { color: #172849; border-color: #b7eeff; background: linear-gradient(180deg, #e2f6ff, #a6ccff); }
+.ranked-play { color: #392803; border-color: #fff0ab; background: linear-gradient(180deg, #fff09b, #ffc34f); }
+.ranked-play small { display: block; font-size: 10px; }
+.ranked-footer button:hover { filter: brightness(1.12); }
+.ranked-tiers, .ranked-rules { grid-area: 2 / 2 / 3 / 4; align-self: center; max-height: 100%; min-width: 0; overflow: auto;
+  padding: 14px 18px; border: 1px solid #9ec4ff66; border-radius: 10px; background: #122349e9; }
+.ranked-tiers h2, .ranked-rules h2 { margin: 0 0 8px; font-size: 20px; }
+.ranked-tiers > div { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.ranked-tiers article { min-width: 0; padding: 4px 2px 7px; display: grid; justify-items: center; text-align: center; border: 1px solid #8fb8ee52; border-radius: 6px; }
+.ranked-tiers article.current { border-color: #ffdf85; background: #dfbe5733; }
+.ranked-tiers canvas { width: min(9vw, 104px); max-width: 100%; }
+.ranked-tiers small { white-space: nowrap; color: #c7d9f4; font-size: 10px; }
+.ranked-rules h3 { margin: 12px 0 3px; }
+.ranked-rules p { margin: 0; line-height: 1.55; color: #d5e6fb; }
+
+@media (max-height: 420px) and (orientation: landscape) {
+  .ranked-screen { gap: 6px 10px; grid-template-columns: 88px minmax(0, 1fr) minmax(165px, 28vw); }
+  .ranked-nav button { padding-inline: 7px; font-size: 13px; }
+  .ranked-summary article { padding: 6px 8px; }
+  .ranked-footer { grid-template-columns: minmax(100px, .75fr) minmax(0, 2fr) minmax(90px, .7fr); gap: 5px; }
+  .ranked-mode-info small { font-size: 10px; }
+  .ranked-modes { gap: 4px; }
+  .ranked-modes button, .ranked-play { min-height: 37px; }
+}
+
+@media (max-width: 650px) and (orientation: portrait) {
+  .ranked-screen { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(260px, 1fr) auto auto; overflow-y: auto; }
+  .ranked-head, .ranked-nav, .ranked-hero, .ranked-summary, .ranked-footer, .ranked-tiers, .ranked-rules { grid-area: auto; grid-column: 1; }
+  .ranked-nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ranked-nav button { padding: 0 4px; text-align: center; font-size: 12px; }
+  .ranked-hero canvas { width: 185px; }
+  .ranked-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ranked-summary article { padding: 6px; }
+  .ranked-summary article span { font-size: 10px; }
+  .ranked-tiers, .ranked-rules { grid-row: 3 / 5; }
+  .ranked-tiers > div { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ranked-tiers canvas { width: 60px; }
+  .ranked-footer { grid-template-columns: minmax(0, 1fr) auto; }
+  .ranked-mode-info { grid-area: 2 / 1; }
+  .ranked-modes { grid-area: 1 / 1 / 2 / 3; }
+  .ranked-play { grid-area: 2 / 2; min-width: 108px; }
+}

@@ -1,9 +1,11 @@
 import { WEAPONS, MODES, POINTS } from '../src/config.js';
 import { cleanNick, seasonNow, seasonLeftText, seasonReward, TASK_BONUS, TASK_BONUS_PARTS, TASK_COINS, TASK_PARTS, TASK_XP } from '../src/profile.js';
 import { clamp, fmtTime } from '../src/util.js';
-import { drawHall, drawHome, drawModePicker, drawRankMenu, drawRoom, drawTrackMenu, taskResetText } from './lobby-ui.js';
+import { drawHall, drawHome, drawModePicker, drawRoom, drawTrackMenu, taskResetText } from './lobby-ui.js';
+import { drawRankMenu } from './ranked-ui.js';
 import { drawShowroom } from './showroom-ui.js';
 import { card, chip, gradient, hit, meter, pageHeader, scrim, GOLD, NAVY, PALE, ribbon } from './paint.js';
+import { sideNavPanel, sideNavRow } from './side-nav.js';
 
 const SETTINGS = [
   ['match', '🎮', '对局', 'MATCH'],
@@ -35,7 +37,8 @@ export function drawMenu(ui) {
     const draw = { mode: drawModePicker, track: drawTrackMenu, rank: drawRankMenu, hall: drawHall, room: drawRoom, tasks: drawTasks }[page] || drawHome;
     draw(ui);
   }
-  if (ui.queue && (ui.tab !== 'race' || ui.panelPage || ui.racePick !== 'home')) {
+  const inRankQueue = ui.tab === 'race' && (ui.panelPage || ui.racePick) === 'rank' && ui.game.rankMode;
+  if (ui.queue && !inRankQueue && (ui.tab !== 'race' || ui.panelPage || ui.racePick !== 'home')) {
     const g = ui.game;
     const x = ui.w / 2 - 139, y = ui.t + 6;
     card(ui, { x, y, w: 278, h: 34 }, ['#ffb03a', '#ff5a2a'], { radius: 18, stroke: '#ffd9a0', width: 2, shadow: 4 });
@@ -74,15 +77,11 @@ function drawSettings(ui) {
   const y = pageHeader(ui, '设置');
   const x = ui.l, w = ui.r - x, h = ui.b - y;
   card(ui, { x, y, w, h }, 'rgba(11,21,48,.95)', { radius: 21, stroke: '#ffffff45', shadow: 0 });
-  ui.panel(x + 3, y + 3, 230, h - 6, 'rgba(3,11,32,.36)', 13, null);
+  const rowH = Math.min(50, (h - 24) / SETTINGS.length);
+  const nav = sideNavPanel(ui, { x: x + 6, y: y + 6, w: 220, h: rowH * SETTINGS.length + 12 });
   SETTINGS.forEach(([key, icon, name, en], i) => {
-    const box = { x: x + 16, y: y + 20 + i * 62, w: 202, h: 56 };
-    const on = key === category;
-    card(ui, box, on ? ['#ffe973', '#ffc51d'] : 'rgba(255,255,255,.065)', { radius: 11, stroke: null, shadow: on ? 3 : 0 });
-    ui.text(icon, box.x + 16, box.y + 29, { size: 22 });
-    ui.text(name, box.x + 54, box.y + 22, { size: 17, bold: true, color: on ? NAVY : '#fff' });
-    ui.text(en, box.x + 55, box.y + 39, { size: 10, bold: true, color: on ? '#765323' : '#a8b6cd' });
-    hit(ui, box, name, () => ui.page(key));
+    const box = { ...nav, y: nav.y + i * rowH, h: rowH - 4 };
+    sideNavRow(ui, box, name, () => ui.page(key), { active: key === category, icon, detail: en });
   });
   const body = { x: x + 255, y: y + 77, w: w - 280, h: h - 92 };
   ui.text(`${active[1]}  ${active[2]}`, body.x, y + 38, { size: 24, bold: true });

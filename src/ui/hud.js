@@ -7,6 +7,7 @@ import { CHAIN_T, MULT_MAX } from '../chain.js';
 import { fmtTime } from '../util.js';
 import { $, hex, esc } from './common.js';
 import { rankRows } from './touchKit.js';
+import { applyGameIcons, setGameText, setGameHtml } from './web-icons.js';
 
 export const hudMethods = {
   showHud(b) {
@@ -87,7 +88,7 @@ export const hudMethods = {
     el.classList.remove('hidden');
     const verb = frozen ? '冻住' : '命中';
     $('impactWho').textContent = `${verb} ${name}`;
-    $('impactCause').textContent = cause || '';
+    setGameText($('impactCause'), cause || '');
   },
 
   hideImpact() {
@@ -120,7 +121,7 @@ export const hudMethods = {
 
   banner(text, kind = '', dur = 1.6) {
     const b = $('banner');
-    b.textContent = text;
+    setGameText(b, text);
     b.className = 'stroke ' + kind;
     void b.offsetWidth;
     b.classList.add('show');
@@ -129,7 +130,7 @@ export const hudMethods = {
 
   tip(text, dur = 1.8) {
     const t = $('tip');
-    t.textContent = text;
+    setGameText(t, text);
     t.classList.add('show');
     this.tipT = dur;
   },
@@ -137,7 +138,7 @@ export const hudMethods = {
   // 技巧链结算 / 中断弹字。kind：good / gold / bad
   chainPop(title, value, kind = 'good') {
     const el = $('trickPop');
-    el.innerHTML = `<div class="t">${esc(title)}</div><div class="v">${esc(value)}</div>`;
+    setGameHtml(el, `<div class="t">${esc(title)}</div><div class="v">${esc(value)}</div>`);
     el.className = 'stroke ' + kind;
     void el.offsetWidth;
     el.classList.add('show');
@@ -183,7 +184,7 @@ export const hudMethods = {
       if (ch.live > 0) items.push(`<span class="lv">漂移中 +${ch.live}</span>`);
       const shown = items.slice(air ? -2 : -3);
       if (air) shown.push(`<span class="lv">${air}</span>`);
-      el.querySelector('.cl').innerHTML = shown.join(' · ');
+      setGameHtml(el.querySelector('.cl'), shown.join(' · '));
     }
     const hold = (!p.grounded && p.state === 'ski') || p.drifting;
     const k = !ch.n || hold ? 1 : Math.max(0, ch.t / CHAIN_T);
@@ -201,7 +202,7 @@ export const hudMethods = {
   feed(html) {
     const f = $('feed');
     const d = document.createElement('div');
-    d.innerHTML = html;
+    setGameHtml(d, html);
     const wrap = document.createElement('p');
     wrap.style.margin = '0';
     wrap.appendChild(d);
@@ -241,14 +242,14 @@ export const hudMethods = {
       return;
     }
     this.updateChain(p);
-    $('posNum').textContent = p.out ? '💀' : p.rank;
+    $('posNum').textContent = p.out ? '出局' : p.rank;
     $('timer').textContent = fmtTime(p.finished ? p.finishTime : g.raceTime);
     $('speedNum').textContent = p.out ? 0 : Math.round(p.vel.length() * 3.6);
     const key = p.weapon ? p.weapon + p.ammo : '';
     if (key !== this.lastItem) {
       this.lastItem = key;
       const w = p.weapon ? WEAPONS[p.weapon] : null;
-      $('itemIcon').textContent = w ? w.icon : '';
+      setGameText($('itemIcon'), w ? w.icon : '');
       $('itemName').textContent = w ? w.name : '';
       $('itemSlot').classList.toggle('has', !!w);
       const am = $('itemAmmo');
@@ -276,9 +277,10 @@ export const hudMethods = {
           return `<div class="row ${r.isPlayer ? 'me' : ''} ${r.finished ? 'done' : ''} ${r.out ? 'out' : ''}${gap}"${team}><span class="n">${i + 1}</span><span class="nm">${esc(r.name)}</span><span>${tag}</span></div>`;
         })
         .join('');
+      applyGameIcons($('rank'));
       if (html !== this.lastModeHtml) {
         this.lastModeHtml = html;
-        $('modeBox').innerHTML = html;
+        setGameHtml($('modeBox'), html);
         $('modeBox').classList.toggle('hidden', !html);
       }
     }

@@ -639,15 +639,15 @@ export function buildLandmarks(course) {
   }
   for (const z of course.zones) {
     if (z.lake) continue;
-    const t = z.type === 'ice' ? ['⚠ 冰面', '#2a7fd0', '#ffffff'] : ['深雪减速', '#e8eef8', '#2a3a55'];
+    const t = z.type === 'ice' ? ['冰面', '#2a7fd0', '#ffffff'] : ['深雪减速', '#e8eef8', '#2a3a55'];
     roadSign(course, kit, group, z.d0 - 8, z.side || -1, ...t);
   }
   for (const a of course.avalanches) {
-    for (const s of [-1, 1]) roadSign(course, kit, group, a.d0 - 24, s, '⚠ 雪崩区', '#ffcf1a', '#2a1a00');
+    for (const s of [-1, 1]) roadSign(course, kit, group, a.d0 - 24, s, '雪崩区', '#ffcf1a', '#2a1a00');
   }
   for (const mv of course.movers) {
-    if (mv.type === 'snowmobile') roadSign(course, kit, group, mv.d - 40, mv.dir, '⚠ 横穿车辆', '#ff7a1a', '#ffffff');
-    else roadSign(course, kit, group, mv.d - 40, -mv.dir, '⚠ 落石', '#8a5a3a', '#ffffff');
+    if (mv.type === 'snowmobile') roadSign(course, kit, group, mv.d - 40, mv.dir, '横穿车辆', '#ff7a1a', '#ffffff');
+    else roadSign(course, kit, group, mv.d - 40, -mv.dir, '落石', '#8a5a3a', '#ffffff');
   }
   kit.finish(group);
 }

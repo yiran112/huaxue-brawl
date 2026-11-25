@@ -2,16 +2,20 @@
 // 触屏时自动俯冲，不用一直按着；倒计时最后点一下任意键就算起步。
 // 按键的图标和位置见 ui/touchKit.js（微信小游戏也用同一套）；道具键上直接显示手里的道具，氮气键上带充能圈。
 // 右上角的小地图（ui/minimap.js）也画在这一层上，代替电脑上左边那根进度条
-import { EMOTES } from './emotes.js';
+import { EMOTES, EMOTE_NAMES } from './emotes.js';
 import { WEAPONS } from './config.js';
 import { iconSvg, LABELS, touchLayout } from './ui/touchKit.js';
 import { buildMinimap, drawMinimap } from './ui/minimap.js';
+import { setGameHtml, setGameText } from './ui/web-icons.js';
 
 const KEYS = ['left', 'right', 'jump', 'drift', 'brake', 'fire', 'nitro', 'reset', 'pause', 'emo', ...EMOTES.map((_, i) => `e${i}`)];
 const NAMES = { left: '左转', right: '右转', reset: '复位', pause: '暂停', emo: '表情' };
 
 function markup(id) {
-  if (/^e\d$/.test(id)) return `<button class="tb em" data-t="${id}">${EMOTES[+id.slice(1)]}</button>`;
+  if (/^e\d$/.test(id)) {
+    const i = +id.slice(1);
+    return `<button class="tb em" data-t="${id}" aria-label="${EMOTE_NAMES[i]}">${EMOTES[i]}</button>`;
+  }
   const sys = /^(reset|pause|emo)$/.test(id);
   let extra = '';
   if (id === 'fire') extra = '<span class="wp"></span><b class="badge hidden"></b>';
@@ -31,7 +35,7 @@ export class Touch {
     this.held = new Map(); // pointerId → { a: 动作, b: 按钮 }
     const el = (this.el = document.createElement('div'));
     el.id = 'touch';
-    el.innerHTML = KEYS.map(markup).join('');
+    setGameHtml(el, KEYS.map(markup).join(''));
     this.btn = {};
     for (const b of el.querySelectorAll('[data-t]')) this.btn[b.dataset.t] = b;
     const fire = this.btn.fire;
@@ -146,7 +150,7 @@ export class Touch {
       const fresh = !!w && (!s.item || !s.item.startsWith(p.weapon));
       s.item = item;
       const f = this.fireEl;
-      f.wp.textContent = w ? w.icon : '';
+      setGameText(f.wp, w ? w.icon : '');
       f.lb.textContent = w ? w.name : LABELS.fire;
       f.badge.classList.toggle('hidden', !w || p.ammo <= 1);
       f.badge.textContent = '×' + (w ? p.ammo : 0);

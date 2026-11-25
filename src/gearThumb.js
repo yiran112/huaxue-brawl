@@ -7,6 +7,8 @@ const W = 320;
 const H = 192;
 // 镜头在装备的左前上方：车头朝着画面左下
 const VIEW = new THREE.Vector3(-1, 0.55, -0.75).normalize();
+const ACCESSORY_FRONT = new THREE.Vector3(-0.32, 0.17, -1).normalize();
+const ACCESSORY_BACK = new THREE.Vector3(-0.56, 0.28, 1).normalize();
 
 let stage = null; // { renderer, scene, camera }
 let broken = false; // 这台机器开不了第二块 WebGL 画布，卡片上就退回用图标
@@ -34,11 +36,11 @@ function getStage() {
 }
 
 // 镜头对准这堆零件，上下左右正好框住，四周留一点边
-export function frameGearPreview(camera, root) {
+export function frameGearPreview(camera, root, view = VIEW) {
   const box = new THREE.Box3().setFromObject(root);
   if (box.isEmpty()) return false;
   const c = box.getCenter(new THREE.Vector3());
-  camera.position.copy(c).addScaledVector(VIEW, 30);
+  camera.position.copy(c).addScaledVector(view, 30);
   camera.lookAt(c);
   camera.updateMatrixWorld(true);
   // 按每个顶点在画面里的位置来框，比按包围盒的八个角框得紧（圆的、斜着的东西不会显得小）
@@ -47,7 +49,7 @@ export function frameGearPreview(camera, root) {
   let y0 = Infinity;
   let y1 = -Infinity;
   root.traverse((o) => {
-    if (!o.isMesh) return;
+    if (!o.isMesh || !o.visible) return;
     const pos = o.geometry.attributes.position;
     _m.multiplyMatrices(camera.matrixWorldInverse, o.matrixWorld);
     for (let i = 0; i < pos.count; i++) {
@@ -92,29 +94,40 @@ export function makeGearPreview(id, look) {
   return { root, skier };
 }
 
-function shoot(id, look) {
-  const st = getStage();
-  if (!st) return null;
-  const { root, skier } = makeGearPreview(id, look);
-  st.scene.add(root);
-  let url = null;
-  if (frameGearPreview(st.camera, root)) {
-    st.renderer.render(st.scene, st.camera);
-    url = toBlobUrl(st.renderer.domElement.toDataURL('image/png'));
-  }
-  st.scene.remove(root);
-  skier.dispose();
-  return url;
+export function appearancePreviewKey(field, look) {
+  if (field === 'hat') return `${look.skin}:${look.hatColor}`;
+  return field === 'back' || field === 'scarf' ? String(look.stripe) : '';
 }
 
-// 返回这件装备的缩略图地址；拍不出来就返回 null
-export function gearThumb(id, look) {
-  const key = String(look.ski);
+export function makeAppearancePreview(field, value, look) {
+  const skier = new Skier({ ...look, gear: 'ski', goggles: 0, back: 0, scarf: 0, mustache: false, [field]: value });
+  const root = new THREE.Group();
+  root.add({ hat: skier.head, goggles: skier.eyewear, back: skier.backwear, scarf: skier.neckwear }[field]);
+  const view = field === 'back' || field === 'scarf' ? ACCESSORY_BACK : ACCESSORY_FRONT;
+  return { root, skier, view };
+}
+
+function shoot(preview) {
+  const st = getStage();
+  if (!st) return null;
+  const { root, skier, view } = preview();
+  st.scene.add(root);
+  try {
+    if (!frameGearPreview(st.camera, root, view)) return null;
+    st.renderer.render(st.scene, st.camera);
+    return toBlobUrl(st.renderer.domElement.toDataURL('image/png'));
+  } finally {
+    st.scene.remove(root);
+    skier.dispose();
+  }
+}
+
+function previewThumb(id, key, preview) {
   const hit = cache.get(id);
   if (hit && hit.key === key) return hit.url;
   let url = null;
   try {
-    url = shoot(id, look);
+    url = shoot(preview);
   } catch (e) {
     broken = true;
   }
@@ -122,4 +135,13 @@ export function gearThumb(id, look) {
   if (hit) URL.revokeObjectURL(hit.url);
   cache.set(id, { key, url });
   return url;
+}
+
+// 装备的颜色是做好的、不跟着角色外观变，每件拍一次就一直用
+export function gearThumb(id, look) {
+  return previewThumb(id, '', () => makeGearPreview(id, look));
+}
+
+export function appearanceThumb(field, value, look) {
+  return previewThumb(`${field}:${value}`, appearancePreviewKey(field, look), () => makeAppearancePreview(field, value, look));
 }

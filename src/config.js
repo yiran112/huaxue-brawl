@@ -1,4 +1,5 @@
 // 全局配置：主题、武器、角色预设、规则
+import { iconToken } from './icon-art.js';
 
 export const THEMES = {
   day: {
@@ -48,22 +49,22 @@ export const LENGTHS = {
 
 // w: 按名次分段的掉落权重 [领先(1-2名), 中游(3-5名), 落后(6-8名)]
 export const WEAPONS = {
-  rocket:    { name: '火箭筒',   icon: '🚀', ammo: 1, w: [8, 10, 8],  prop: 'tube', ai: 'ahead' },
-  homing:    { name: '追踪导弹', icon: '🎯', ammo: 1, w: [2, 8, 10],  prop: 'tube', ai: 'anyAhead' },
-  snowball:  { name: '雪球',     icon: '⚪', ammo: 3, w: [10, 6, 3],  prop: 'gun',  ai: 'ahead' },
-  freeze:    { name: '冰冻枪',   icon: '🧊', ammo: 1, w: [4, 6, 6],   prop: 'gun',  ai: 'ahead' },
-  gatling:   { name: '加特林',   icon: '🔫', ammo: 2, w: [5, 8, 7],   prop: 'gatling', ai: 'ahead' },
-  shotgun:   { name: '霰弹枪',   icon: '💥', ammo: 2, w: [7, 6, 4],   prop: 'gun',  ai: 'near' },
-  mine:      { name: '地雷',     icon: '💣', ammo: 2, w: [12, 6, 2],  prop: null,   ai: 'behind' },
-  dynamite:  { name: '炸药',     icon: '🧨', ammo: 2, w: [6, 6, 5],   prop: null,   ai: 'ahead' },
-  goat:      { name: '爆炸山羊', icon: '🐐', ammo: 1, w: [2, 6, 9],   prop: null,   ai: 'anyAhead' },
-  airstrike: { name: '空袭',     icon: '✈️', ammo: 1, w: [0, 4, 9],   prop: null,   ai: 'anyAhead' },
-  lightning: { name: '雷击',     icon: '⚡', ammo: 1, w: [0, 3, 8],   prop: null,   ai: 'anyAhead' },
-  boost:     { name: '氮气加速', icon: '🔥', ammo: 1, w: [3, 8, 12],  prop: null,   ai: 'self' },
-  shield:    { name: '护盾',     icon: '🛡️', ammo: 1, w: [10, 6, 4],  prop: null,   ai: 'self' },
-  punch:     { name: '拳击手套', icon: '🥊', ammo: 2, w: [7, 5, 3],   prop: null,   ai: 'melee' },
-  hook:      { name: '钩爪',     icon: '⚓', ammo: 1, w: [0, 6, 9],   prop: 'gun',  ai: 'anyAhead' },
-  bigball:   { name: '巨型雪球', icon: '☃️', ammo: 1, w: [3, 6, 6],   prop: null,   ai: 'anyAhead' },
+  rocket:    { name: '火箭筒',   icon: iconToken('rocket'), ammo: 1, w: [8, 10, 8],  prop: 'tube', ai: 'ahead' },
+  homing:    { name: '追踪导弹', icon: iconToken('homing'), ammo: 1, w: [2, 8, 10],  prop: 'tube', ai: 'anyAhead' },
+  snowball:  { name: '雪球',     icon: iconToken('snowball'), ammo: 3, w: [10, 6, 3],  prop: 'gun',  ai: 'ahead' },
+  freeze:    { name: '冰冻枪',   icon: iconToken('freeze'), ammo: 1, w: [4, 6, 6],   prop: 'gun',  ai: 'ahead' },
+  gatling:   { name: '加特林',   icon: iconToken('gatling'), ammo: 2, w: [5, 8, 7],   prop: 'gatling', ai: 'ahead' },
+  shotgun:   { name: '霰弹枪',   icon: iconToken('shotgun'), ammo: 2, w: [7, 6, 4],   prop: 'gun',  ai: 'near' },
+  mine:      { name: '地雷',     icon: iconToken('mine'), ammo: 2, w: [12, 6, 2],  prop: null,   ai: 'behind' },
+  dynamite:  { name: '炸药',     icon: iconToken('dynamite'), ammo: 2, w: [6, 6, 5],   prop: null,   ai: 'ahead' },
+  goat:      { name: '爆炸山羊', icon: iconToken('goat'), ammo: 1, w: [2, 6, 9],   prop: null,   ai: 'anyAhead' },
+  airstrike: { name: '空袭',     icon: iconToken('airstrike'), ammo: 1, w: [0, 4, 9],   prop: null,   ai: 'anyAhead' },
+  lightning: { name: '雷击',     icon: iconToken('lightning'), ammo: 1, w: [0, 3, 8],   prop: null,   ai: 'anyAhead' },
+  boost:     { name: '氮气加速', icon: iconToken('boost'), ammo: 1, w: [3, 8, 12],  prop: null,   ai: 'self' },
+  shield:    { name: '护盾',     icon: iconToken('shield'), ammo: 1, w: [10, 6, 4],  prop: null,   ai: 'self' },
+  punch:     { name: '拳击手套', icon: iconToken('punch'), ammo: 2, w: [7, 5, 3],   prop: null,   ai: 'melee' },
+  hook:      { name: '钩爪',     icon: iconToken('hook'), ammo: 1, w: [0, 6, 9],   prop: 'gun',  ai: 'anyAhead' },
+  bigball:   { name: '巨型雪球', icon: iconToken('bigball'), ammo: 1, w: [3, 6, 6],   prop: null,   ai: 'anyAhead' },
 };
 export const WEAPON_KEYS = Object.keys(WEAPONS);
 
@@ -72,18 +73,19 @@ export const SUIT_COLORS = [
   0xff3d6e, 0xff8a1f, 0xffd21f, 0x38d16a, 0x1fc8d6, 0x2f6bff, 0x8a4dff, 0xff5fd0,
   0xf4f4f4, 0x2b2f3a, 0xb7ff3c, 0xff5a36,
 ];
-export const HATS = ['毛线帽', '平头+头带', '莫西干', '长发胡子', '头盔护目镜', '爆炸头', '礼帽', '绿毛'];
+export const HATS = ['毛线帽', '平头+头带', '莫西干', '长发胡子', '头盔护目镜', '爆炸头', '礼帽', '绿毛', '基础短发'];
+export const DEFAULT_HAT = HATS.length - 1;
 
 // 8 位选手的默认造型（0 号是玩家默认造型）
 export const LOOK_PRESETS = [
-  { hat: 0, hatColor: 0x2f3fd0, skin: 0, jacket: 0xff8a1f, stripe: 0xffd21f, pants: 0x2f6bff, ski: 0xf4f4f4, mustache: false },
-  { hat: 1, hatColor: 0x1a1a1a, skin: 1, jacket: 0xff5fd0, stripe: 0xffd21f, pants: 0x8a4dff, ski: 0x38d16a, mustache: true },
-  { hat: 2, hatColor: 0xb03ad6, skin: 0, jacket: 0xffb46b, stripe: 0xf4f4f4, pants: 0xff8a1f, ski: 0xff3d6e, mustache: false },
-  { hat: 3, hatColor: 0x2a1a12, skin: 3, jacket: 0x2f6bff, stripe: 0xff5fd0, pants: 0x2f3fd0, ski: 0xffd21f, mustache: true },
-  { hat: 4, hatColor: 0xff8a1f, skin: 2, jacket: 0x4b4f5c, stripe: 0xffd21f, pants: 0xff3d6e, ski: 0x1fc8d6, mustache: true },
-  { hat: 5, hatColor: 0x2a1a12, skin: 4, jacket: 0x38d16a, stripe: 0xff3d6e, pants: 0x1fc8d6, ski: 0xff8a1f, mustache: false },
-  { hat: 6, hatColor: 0x16161a, skin: 0, jacket: 0xf4f4f4, stripe: 0xff8a1f, pants: 0xffb46b, ski: 0x8a4dff, mustache: true },
-  { hat: 7, hatColor: 0x7ad21f, skin: 1, jacket: 0x8a4dff, stripe: 0x1fc8d6, pants: 0xff5fd0, ski: 0xb7ff3c, mustache: false },
+  { hat: DEFAULT_HAT, hatColor: 0x2f3fd0, skin: 0, jacket: 0xff8a1f, stripe: 0xffd21f, pants: 0x2f6bff, mustache: false },
+  { hat: 1, hatColor: 0x1a1a1a, skin: 1, jacket: 0xff5fd0, stripe: 0xffd21f, pants: 0x8a4dff, mustache: true },
+  { hat: 2, hatColor: 0xb03ad6, skin: 0, jacket: 0xffb46b, stripe: 0xf4f4f4, pants: 0xff8a1f, mustache: false },
+  { hat: 3, hatColor: 0x2a1a12, skin: 3, jacket: 0x2f6bff, stripe: 0xff5fd0, pants: 0x2f3fd0, mustache: true },
+  { hat: 4, hatColor: 0xff8a1f, skin: 2, jacket: 0x4b4f5c, stripe: 0xffd21f, pants: 0xff3d6e, mustache: true },
+  { hat: 5, hatColor: 0x2a1a12, skin: 4, jacket: 0x38d16a, stripe: 0xff3d6e, pants: 0x1fc8d6, mustache: false },
+  { hat: 6, hatColor: 0x16161a, skin: 0, jacket: 0xf4f4f4, stripe: 0xff8a1f, pants: 0xffb46b, mustache: true },
+  { hat: 7, hatColor: 0x7ad21f, skin: 1, jacket: 0x8a4dff, stripe: 0x1fc8d6, pants: 0xff5fd0, mustache: false },
 ];
 
 export const BOT_NAMES = ['雪豹老张', '火箭阿强', '羊倌小李', '冰镇可乐', '极光妹', '山大王', '老六', '雪球杰克', '滑铲侠', '冲坡大爷'];

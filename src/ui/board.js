@@ -6,6 +6,7 @@ import { tierAt } from '../rank.js';
 import { fetchLeaderboard } from '../account.js';
 import { fmtTime } from '../util.js';
 import { hex, esc, TIER_ICONS } from './common.js';
+import { setGameHtml } from './web-icons.js';
 
 const BOARD_COLORS = ['#ff5a7a', '#4f7bff', '#3ddc97', '#ffb21f', '#c084fc', '#ff8a4a', '#49d6e8'];
 const boardColor = (name) => {
@@ -122,7 +123,7 @@ export const boardMethods = {
 
   patchBoard() {
     const el = document.querySelector('#tab-race .board');
-    if (el) el.innerHTML = this.boardInner();
+    if (el) setGameHtml(el, this.boardInner());
   },
 
   refreshBoard() {
