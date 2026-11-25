@@ -1,6 +1,6 @@
 import { GEAR, GEAR_KEYS, RARITY, RARITY_KEYS, rarityRank } from '../gear.js';
 
-export const GARAGE_RANKS = [['all', '全部'], ...[...RARITY_KEYS].reverse().map((id) => [id, `${id} · ${RARITY[id].name}`])];
+export const GARAGE_RANKS = [['all', '全部'], ...[...RARITY_KEYS].reverse().map((id) => [id, RARITY[id].name])];
 export const GARAGE_OWNERSHIP = [['all', '全部装备'], ['owned', '已拥有'], ['unowned', '未拥有']];
 export const GARAGE_SORTS = [['default', '默认排序'], ['rarity', '稀有度优先'], ['owned', '已拥有优先']];
 

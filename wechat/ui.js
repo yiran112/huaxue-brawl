@@ -7,7 +7,7 @@ import { drawMenu, drawMatch, drawAccount, drawResults } from './pages.js';
 import { drawRace, drawPause, drawReplay } from './race-ui.js';
 import { ModelPreviews } from './model-previews.js';
 import { screenQuad } from './display.js';
-import { gameIconImage, iconRuns, iconToken } from '../src/icon-art.js';
+import { gameIconImage, iconRuns, iconToken, rarityLetter } from '../src/icon-art.js';
 
 const COLORS = {
   panel: 'rgba(11,21,48,.88)',
@@ -16,7 +16,8 @@ const COLORS = {
 };
 
 function runWidth(context, run, size) {
-  return typeof run === 'string' ? context.measureText(run).width : size * 1.1;
+  if (typeof run === 'string') return context.measureText(run).width;
+  return size * (rarityLetter(run.id) ? 1.45 : 1.1);
 }
 
 export class MiniUI {

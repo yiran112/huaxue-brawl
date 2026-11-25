@@ -46,6 +46,7 @@
 .wardrobe-badge { position: absolute; top: 5px; left: 5px; padding: 2px 5px; border-radius: 3px;
   color: #ffdbdf; background: #4b233bdf; font-size: 10px; font-weight: 700; }
 .wardrobe-badge.worn { color: #bcf5dd; background: #153a3ae8; }
+.wardrobe-tile .rarity-corner { --rarity-size: 27px; }
 .wardrobe-swatch { width: min(70%, 52px); aspect-ratio: 1.65; background: var(--swatch); border: 1px solid #eff9ffb0; border-radius: 5px; }
 .wardrobe-swatch.rainbow { background: linear-gradient(110deg, #ff5272, #ffc348, #73e99e, #4d8cff, #b879ff); }
 .swatches .wardrobe-tile { height: 66px; }

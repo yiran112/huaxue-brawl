@@ -33,9 +33,10 @@ test('微信车库：侧栏按稀有度筛选，目录卡片打开同一件装�
   const game = { profile, look: { gear: 'ski' }, setShow: (...args) => { game.show = args; } };
   const ui = {
     game, tab: 'garage', w: 1191, h: 541, l: 14, r: 1177, t: 10, b: 529,
-    models: [], hits: [], offsets: new Map(),
+    models: [], hits: [], icons: [], offsets: new Map(),
     ctx: canvasContext(),
     panel() {}, text() {}, rounded() {}, invalidate() {},
+    icon(id) { this.icons.push(id); },
     headerRight() { return this.r; },
     addHit(hit) { this.hits.push(hit); },
     scrollArea(key, box, size, draw) { draw(0); },
@@ -44,13 +45,16 @@ test('微信车库：侧栏按稀有度筛选，目录卡片打开同一件装�
   drawShowroom(ui);
   assert.equal(ui.previewGear, undefined);
   assert.ok(ui.models.some((model) => model.gear === 'wood'));
-  ui.hits.find((hit) => hit.label === 'A · 稀有').action();
+  assert.ok(ui.icons.includes('rarity-c'));
+  ui.hits.find((hit) => hit.label === '稀有').action();
   assert.equal(ui.garageCatalog.rank, 'A');
   ui.models.length = 0;
   ui.hits.length = 0;
+  ui.icons.length = 0;
   drawShowroom(ui);
   const rareGear = new Set(garageEntries(game, { rank: 'A' }).map(({ id }) => id));
   assert.ok(ui.models.length && ui.models.every(({ gear }) => rareGear.has(gear)));
+  assert.deepEqual([...new Set(ui.icons)], ['rarity-a']);
   ui.hits.find((hit) => hit.label === '全部').action();
   ui.models.length = 0;
   ui.hits.length = 0;

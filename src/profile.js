@@ -1,6 +1,7 @@
 // 玩家存档与成长：等级经验、雪花币、改装币、解锁购买、装备改装、每日任务、成就、生涯数据、结算奖励。
 // 浏览器里留一份缓存；账号登录之后，服务器上的那份为准（见 src/account.js）。
 import { DEFAULT_HAT, MODE_KEYS, MODES, POINTS } from './config.js';
+import { rarityToken } from './icon-art.js';
 import { GEAR, GEAR_KEYS, RARITY, UPGRADES, UP_KEYS, UP_MAX, UP_COST, COSMETIC_SLOTS, BOX_COST, BOX_REFUND, BOX_POOL, rollBox, unlockOf } from './gear.js';
 import { CUPS, TRACKS, medalTimes } from './tracks.js';
 import { RANK_LV, RANK_MAP, tierAt, scoreRank, scoreLeave, localDay } from './rank.js';
@@ -622,7 +623,7 @@ export class Profile {
   unlocksBetween(from, to) {
     const out = [];
     const hit = (u, key) => u && u.lv && u.lv > from && u.lv <= to && !this.data.owned[key];
-    for (const k of GEAR_KEYS) if (hit(GEAR[k].unlock, 'gear:' + k)) out.push(`${GEAR[k].icon} ${GEAR[k].name}（${GEAR[k].rarity}）${GEAR[k].unlock.cost ? '（可购买）' : ''}`);
+    for (const k of GEAR_KEYS) if (hit(GEAR[k].unlock, 'gear:' + k)) out.push(`${GEAR[k].icon} ${GEAR[k].name} ${rarityToken(GEAR[k].rarity)}${GEAR[k].unlock.cost ? '（可购买）' : ''}`);
     return out;
   }
 

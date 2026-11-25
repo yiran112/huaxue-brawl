@@ -1,4 +1,5 @@
 import { WARDROBE_GROUPS, previewWardrobe, wardrobeAction, wardrobeState } from '../src/ui/appearance.js';
+import { rarityIcon } from '../src/icon-art.js';
 import { hex } from '../src/ui/common.js';
 import { chip, gradient, hit, pageHeader, GOLD, PALE, ribbon } from './paint.js';
 import { sideNavPanel, sideNavRow } from './side-nav.js';
@@ -71,6 +72,7 @@ function appearanceCard(ui, box, field, option, focused, select) {
     ui.panel(x + 5, y + 4, 43, 17, option.equipped ? '#153a3aeb' : '#4b233beb', 3, null);
     ui.text(status, x + 26.5, y + 12, { size: 11, bold: true, center: true, color: option.equipped ? '#bcf5dd' : '#ffdbdf' });
   }
+  if (option.tier) ui.icon(rarityIcon(option.tier), x + w - 32, y + 4, 27);
   ui.text(option.name, x + w / 2, y + h - 11, { size: 15, bold: true, center: true, max: w - 10 });
   hit(ui, box, option.name, select);
 }

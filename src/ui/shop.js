@@ -1,6 +1,7 @@
 // 商城：补给箱和装备货架
 import { GEAR, SHOP_GEAR, RARITY, STAT_NAMES, STAT_KEYS, STAT_MAX, BOX_COST, BOX_REFUND, BOX_WEIGHT, BOX_POOL, gearStats } from '../gear.js';
 import { gearThumb } from '../gearThumb.js';
+import { rarityToken } from '../icon-art.js';
 import { $, esc, SHOW, cosmeticOf } from './common.js';
 
 export const shopMethods = {
@@ -38,7 +39,7 @@ export const shopMethods = {
     const wear = w.dup || worn ? '' : '<button class="sbtn main" data-act="boxWear"><b>立即佩戴</b><i>WEAR</i></button>';
     return `<div class="bfx r${w.tier} ${w.dup ? 'dup' : ''}"><i class="bfxWm">SNOW SUPPLY</i><div class="bfxRays"></div><div class="bfxBox">🎁</div>
       <div class="bfxWin"><small class="bfxHead">${head}</small><div class="bfxIc">${c.icon}</div>
-        <span class="bfxTag">${RARITY[w.tier].name} · ${c.part}</span><b class="bfxName">${esc(c.name)}</b><p>${line}</p>
+        <span class="bfxTag">${rarityToken(w.tier)} ${RARITY[w.tier].name} · ${c.part}</span><b class="bfxName">${esc(c.name)}</b><p>${line}</p>
         <div class="bfxAct">${again}${wear}<button class="sbtn" data-act="boxFxOk"><b>收下</b><i>OK</i></button></div></div></div>`;
   },
 
@@ -69,7 +70,7 @@ export const shopMethods = {
     }
     const cmp = id === cur ? '' : `<em>属性右上角是和正在用的「${esc((GEAR[cur] || GEAR.ski).name)}」（含改装）相比</em>`;
     return `<div class="sihead"><div class="sbadge">${G.icon}</div>
-        <div class="sname"><small>${G.rarity} · ${RARITY[G.rarity].name} · ${state}<button class="slink" data-act="toGarage" data-id="${id}">去车库 ›</button></small><b>${G.name}</b></div>${btn}</div>
+        <div class="sname"><small>${rarityToken(G.rarity)} ${RARITY[G.rarity].name} · ${state}<button class="slink" data-act="toGarage" data-id="${id}">去车库 ›</button></small><b>${G.name}</b></div>${btn}</div>
       <p class="sdesc">${G.desc}${cmp}</p>
       <div class="ssts">${stats}</div>`;
   },
@@ -82,7 +83,7 @@ export const shopMethods = {
     const wear = w.dup || worn ? '' : '<button class="sbtn main" data-act="boxWear"><b>立即佩戴</b><i>WEAR</i></button>';
     const line = w.dup ? `已经有了，折成雪花币返还 ❄${BOX_REFUND}` : `已放进「角色」页的${c.slot === 'hat' ? '造型' : '饰品'}里`;
     return `<div class="bwin r${w.tier}"><div class="bwic">${c.icon}</div>
-      <div class="sname"><small>${w.dup ? '重复' : '开出新外观！'} · ${RARITY[w.tier].name} · ${c.part}</small><b>${esc(c.name)}</b><span>${line}</span></div>
+      <div class="sname"><small>${w.dup ? '重复' : '开出新外观！'} · ${rarityToken(w.tier)} ${RARITY[w.tier].name} · ${c.part}</small><b>${esc(c.name)}</b><span>${line}</span></div>
       <div class="bwact">${wear}<button class="sbtn" data-act="boxOk"><b>好的</b><i>OK</i></button></div></div>`;
   },
 
@@ -92,7 +93,7 @@ export const shopMethods = {
     const got = BOX_POOL.filter((it) => P.boxOwned(it.key)).length;
     const tiers = Object.keys(BOX_WEIGHT).reverse();
     const total = tiers.reduce((n, t) => n + BOX_WEIGHT[t], 0);
-    const odds = tiers.map((t) => `<span class="r${t}">${RARITY[t].name} ${Math.round((BOX_WEIGHT[t] / total) * 100)}%</span>`).join('');
+    const odds = tiers.map((t) => `<span class="r${t}">${rarityToken(t)} ${RARITY[t].name} ${Math.round((BOX_WEIGHT[t] / total) * 100)}%</span>`).join('');
     let btn;
     if (got >= BOX_POOL.length) btn = '<button class="bopen off" disabled><b>已全部收集</b><i>ALL CLEAR</i></button>';
     else {
@@ -120,7 +121,7 @@ export const shopMethods = {
         const img = shots ? gearThumb(k, g.look) : null;
         const pic = img ? `<img src="${img}" alt="" draggable="false">` : `<span class="ic">${K.icon}</span>`;
         const tag = has ? '<span class="price own">已拥有</span>' : `<span class="price ${P.coins < K.unlock.cost ? 'poor' : ''}">❄ ${K.unlock.cost}</span>`;
-        return `<button class="scard r${r} ${k === id && !this.boxWin ? 'on' : ''}" data-act="sview" data-id="${k}"><span class="spic">${pic}</span><span class="srar">${r}</span>${k === cur ? '<em>使用中</em>' : ''}<span class="snm">${K.name}</span>${tag}</button>`;
+        return `<button class="scard r${r} ${k === id && !this.boxWin ? 'on' : ''}" data-act="sview" data-id="${k}"><span class="spic">${pic}</span><span class="rarity-corner">${rarityToken(r)}</span>${k === cur ? '<em>使用中</em>' : ''}<span class="snm">${K.name}</span>${tag}</button>`;
       })
       .join('');
     return `<section class="shsec" data-sec="${r}"><header class="shhead"><b>${RARITY[r].name}装备</b><span>已拥有 ${got} / ${list.length}</span></header><div class="shgrid">${cards}</div></section>`;

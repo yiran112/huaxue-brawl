@@ -21,7 +21,7 @@ export const garageCatalogMethods = {
   garageCatalogHtml() {
     const g = this.game;
     const settings = this.garageCatalog || {};
-    const nav = GARAGE_RANKS.map(([id, label]) => `<button data-act="garageRank" data-id="${id}" aria-pressed="${id === (settings.rank || 'all')}">${id === 'all' ? label : rarityToken(id) + label.slice(id.length)}</button>`).join('');
+    const nav = GARAGE_RANKS.map(([id, label]) => `<button data-act="garageRank" data-id="${id}" aria-pressed="${id === (settings.rank || 'all')}">${id === 'all' ? label : `${rarityToken(id)} · ${label}`}</button>`).join('');
     return `<section class="garage-catalog">
       <nav class="garage-catalog-nav side-nav" aria-label="装备稀有度"><b class="side-nav-heading">滑行装备</b>${nav}</nav>
       <section class="garage-catalog-body" aria-label="滑行装备列表">

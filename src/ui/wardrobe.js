@@ -1,5 +1,6 @@
 import './wardrobe.css';
 import { appearanceThumb } from '../gearThumb.js';
+import { rarityToken } from '../icon-art.js';
 import { WARDROBE_GROUPS, previewWardrobe, wardrobeAction, wardrobeState } from './appearance.js';
 import { $, esc, hex } from './common.js';
 
@@ -10,8 +11,9 @@ function wardrobeTile(game, field, option, i, selected, takePhoto) {
       : image ? `<img src="${image}" alt="" draggable="false">` : `<i>${option.icon}</i>`;
   const state = option.equipped ? '<span class="wardrobe-badge worn">使用中</span>'
     : !option.owned ? '<span class="wardrobe-badge">未解锁</span>' : '';
+  const tier = option.tier ? `<span class="rarity-corner">${rarityToken(option.tier)}</span>` : '';
   return `<button class="wardrobe-tile" data-act="wardrobeItem" data-index="${i}" data-tier="${option.tier || ''}" aria-pressed="${selected}">
-    <span class="wardrobe-visual" aria-hidden="true">${icon}</span>${state}<b>${esc(option.name)}</b></button>`;
+    <span class="wardrobe-visual" aria-hidden="true">${icon}</span>${state}${tier}<b>${esc(option.name)}</b></button>`;
 }
 
 export const wardrobeMethods = {

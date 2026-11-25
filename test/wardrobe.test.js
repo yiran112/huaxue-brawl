@@ -24,6 +24,7 @@ function wardrobe(width, height) {
       beginPath() {}, moveTo() {}, lineTo() {}, closePath() {},
     },
     text() {}, panel() {}, rounded() {}, invalidate() {},
+    icon(id) { this.icons.push(id); },
     headerRight() { return this.r; },
     addHit(hit) { this.hits.push(hit); },
     scrollArea(key, box, height, draw) { draw(this.offsets.get(key) || 0); },
@@ -32,6 +33,7 @@ function wardrobe(width, height) {
   };
   const draw = () => {
     ui.hits = [];
+    ui.icons = [];
     ui.models = [];
     ui.gestures = [];
     drawWardrobe(ui);
@@ -51,6 +53,7 @@ test('微信装扮：分类、试穿区和物品卡横向排列，获取按钮�
     assert.ok(ui.frame.x + ui.frame.w < tile.x);
     assert.ok(ui.frame.y + ui.frame.h < action.y && action.y + action.h <= ui.b);
     assert.ok(ui.models.some(({ appearance }) => appearance.field === 'back' && appearance.value === 1));
+    assert.ok(ui.icons.includes('rarity-c'));
     const back = find('‹  返回');
     assert.ok(back.x === ui.l && back.y + back.h < nav.y);
     find('个人资料').action();

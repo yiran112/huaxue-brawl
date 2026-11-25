@@ -41,7 +41,7 @@ export function iconRuns(value) {
 
 export function plainIconText(value) {
   const runs = iconRuns(value);
-  return runs ? runs.filter((part) => typeof part === 'string').join('').trim() : String(value);
+  return runs ? runs.map((part) => typeof part === 'string' ? part : rarityLetter(part.id)).join('').trim() : String(value);
 }
 
 const images = new Map();

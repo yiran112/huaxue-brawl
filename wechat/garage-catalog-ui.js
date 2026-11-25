@@ -1,9 +1,9 @@
 import { GEAR_KEYS } from '../src/gear.js';
+import { rarityIcon, rarityToken } from '../src/icon-art.js';
 import { garageEntries, GARAGE_OWNERSHIP, GARAGE_RANKS, GARAGE_SORTS } from '../src/ui/garage-catalog-state.js';
 import { chip, gradient, hit, pageHeader, GOLD, NAVY, PALE } from './paint.js';
 import { sideNavPanel, sideNavRow } from './side-nav.js';
 
-const RARITY_COLOR = { C: '#d5eaff', B: '#bff7e8', A: '#e8d1ff', S: '#ffe9aa' };
 const RARITY_PANEL = { C: ['#749bd0', '#263e70'], B: ['#69a7bc', '#285372'], A: ['#9a88ca', '#473d73'], S: ['#b1a18c', '#525677'] };
 
 function filterControl(ui, box, key, list, value, update) {
@@ -23,8 +23,8 @@ function gearCard(ui, box, entry, inspect) {
   ui.panel(x + 1, y + h - 27, w - 2, 26, '#102344ed', 4, null);
   chip(ui, equipped ? '使用中' : owned ? '已拥有' : '未拥有', { x: x + 5, y: y + 5, w: 52, h: 19 }, null,
     { fill: equipped ? GOLD : owned ? '#23575a' : '#183354', color: equipped ? NAVY : owned ? '#ccffe5' : '#d4edff', size: 11, radius: 4 });
-  chip(ui, gear.rarity, { x: x + w - 28, y: y + 5, w: 23, h: 19 }, null,
-    { fill: RARITY_COLOR[gear.rarity], color: NAVY, size: 13, radius: 4 });
+  const badge = Math.min(38, w * .27);
+  ui.icon(rarityIcon(gear.rarity), x + w - badge - 5, y + 4, badge);
   const modelW = Math.min(w - 10, (h - 47) * 5 / 3);
   const modelH = modelW * 3 / 5;
   ui.models.push({ x: x + (w - modelW) / 2, y: y + (h - 27 - modelH) / 2 + 7, w: modelW, h: modelH, gear: id });
@@ -51,7 +51,9 @@ export function drawGarageCatalog(ui, inspect) {
   ui.text('滑行装备', nav.x + 11, nav.y + row / 2, { color: '#b5cae8', size: 14, bold: true, max: nav.w - 20 });
   GARAGE_RANKS.forEach(([id, label], i) => {
     const box = { ...nav, y: nav.y + (i + 1) * row, h: row - 4 };
-    sideNavRow(ui, box, label, () => update('rank', id), { active: id === (settings.rank || 'all') });
+    sideNavRow(ui, box, label, () => update('rank', id), {
+      active: id === (settings.rank || 'all'), icon: id === 'all' ? '' : rarityToken(id),
+    });
   });
 
   const x = l + navW + 13;

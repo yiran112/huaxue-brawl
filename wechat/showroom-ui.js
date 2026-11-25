@@ -3,6 +3,7 @@ import {
   RARITY, RARITY_KEYS, SHOP_GEAR, STAT_KEYS, STAT_MAX, STAT_NAMES, UP_KEYS, UP_MAX, gearStats,
 } from '../src/gear.js';
 import { ACHIEVEMENTS, CUP_LV, STAT_LABELS } from '../src/profile.js';
+import { rarityIcon, rarityToken } from '../src/icon-art.js';
 import { CUPS } from '../src/tracks.js';
 import { SHOW, cosmeticOf } from '../src/ui/common.js';
 import { card, chip, gradient, hit, meter, pageHeader, scrim, GOLD, NAVY, PALE, ribbon } from './paint.js';
@@ -13,7 +14,6 @@ import { garageStep } from '../src/ui/garage-catalog-state.js';
 import { drawTune } from './tune-ui.js';
 
 const TITLES = { garage: '车库', growth: '成长', shop: '商城' };
-const RARE = { C: '#cde2ff', B: '#79edcb', A: '#d9a7ff', S: '#ffd569' };
 const SHELF_COLUMNS = 2;
 const SHELF_TILE_HEIGHT = 111;
 const SHELF_GAP = 8;
@@ -66,9 +66,9 @@ function section(ui, label, x, y, note = '') {
   if (note) ui.text(note, x + 17 + label.length * 15, y + 1, { size: 11, bold: true, color: '#b9c8eb' });
 }
 
-function tag(ui, label, x, y, fill = '#3a54a7') {
-  const w = label.length * 11 + 17;
-  chip(ui, label, { x, y, w, h: 22 }, null, { fill, size: 11, radius: 3 });
+function tag(ui, label, x, y, fill = '#3a54a7', tier = '') {
+  const w = label.length * 11 + 17 + (tier ? 20 : 0);
+  chip(ui, tier ? `${rarityToken(tier)} ${label}` : label, { x, y, w, h: 22 }, null, { fill, size: 11, radius: 3 });
   return w + 5;
 }
 
@@ -145,9 +145,9 @@ function garage(ui, panel) {
   const st = p.unlockState(gear.unlock, key);
   const origin = { ...panel, h: panel.h - 80 };
   const mods = UP_KEYS.reduce((sum, k) => sum + p.up(id)[k], 0);
-  const body = infoPanel(ui, origin, { badge: gear.icon, small: `${gear.rarity} · ${rare.name} · ${equipped ? '使用中' : owned ? '已拥有' : st === 'buy' ? '可购买' : '未解锁'}`,
+  const body = infoPanel(ui, origin, { badge: gear.icon, small: `${rarityToken(gear.rarity)} ${rare.name} · ${equipped ? '使用中' : owned ? '已拥有' : st === 'buy' ? '可购买' : '未解锁'}`,
     title: gear.name, side: `改装 ${mods} / ${UP_KEYS.length * UP_MAX}` });
-  const x = body.x + tag(ui, `${gear.rarity} · ${rare.name}`, body.x, body.y, '#617197');
+  const x = body.x + tag(ui, rare.name, body.x, body.y, '#617197', gear.rarity);
   const sorted = STAT_KEYS.slice().sort((a, b) => gear.stats[b] - gear.stats[a]);
   tag(ui, gear.stats[sorted[0]] === gear.stats[sorted[4]] ? '各项均衡' : STAT_NAMES[sorted[0]] + '突出', x, body.y, '#d17a20');
   body.y += 37;
@@ -317,7 +317,8 @@ function shop(ui, panel, _, __, g) {
     const bx = list.x + 74;
     ui.text('外观抽奖', bx, sy + 48, { size: 22, bold: true, italic: true, outline: true });
     ui.text(`随机开出一件外观，重复返还 ❄${BOX_REFUND}`, bx, sy + 68, { size: 12, bold: true, max: list.w - 86 });
-    ui.text(`传说 ${BOX_WEIGHT.S}%  稀有 ${BOX_WEIGHT.A}%  普通 ${BOX_WEIGHT.C}%`, bx, sy + 84, { size: 11, bold: true, max: list.w - 86 });
+    const odds = Object.keys(BOX_WEIGHT).reverse().map((tier) => `${rarityToken(tier)} ${RARITY[tier].name} ${BOX_WEIGHT[tier]}%`).join('   ');
+    ui.text(odds, bx, sy + 84, { size: 11, bold: true, max: list.w - 86 });
     ui.text(`❄ ${BOX_COST}`, list.x + list.w - 143, sy + 110, { size: 14, bold: true, right: true });
     ribbon(ui, '开启', { x: list.x + list.w - 132, y: sy + 94, w: 120, h: 32 }, () => {
       const item = p.openBox();
@@ -342,9 +343,8 @@ function shop(ui, panel, _, __, g) {
         const modelH = 64;
         const modelW = Math.min(box.w - 12, modelH * 5 / 3);
         card(ui, box, ['#fff', '#e8eefb'], { radius: 10, stroke: key === id ? GOLD : '#a7c0ed', width: 2, shadow: 0 });
-        chip(ui, item.rarity, { x: box.x + 6, y: box.y + 5, w: 22, h: 18 }, null,
-          { fill: RARE[item.rarity], color: NAVY, radius: 4, size: 12 });
-        ui.text(item.name, box.x + 34, box.y + 14, { size: 13, bold: true, color: NAVY, max: box.w - 42 });
+        ui.icon(rarityIcon(item.rarity), box.x + 5, box.y + 3, 28);
+        ui.text(item.name, box.x + 38, box.y + 15, { size: 13, bold: true, color: NAVY, max: box.w - 46 });
         ui.models.push({ x: box.x + (box.w - modelW) / 2, y: box.y + 26, w: modelW, h: modelH, gear: key });
         ui.text(p.gearOwned(key) ? '已拥有' : `❄ ${item.unlock.cost}`, box.x + box.w / 2, box.y + box.h - 12,
           { size: 12, bold: true, color: '#3d4c75', center: true, max: box.w - 12 });
@@ -356,7 +356,7 @@ function shop(ui, panel, _, __, g) {
   const info = { x: infoX, y: ui.b - 175, w: x - infoX - 11, h: 168 };
   ui.panel(info.x, info.y, info.w, info.h, 'rgba(12,28,76,.9)', 8, '#416297');
   chip(ui, gear.icon, { x: info.x + 14, y: info.y + 12, w: 48, h: 48 }, null, { active: true, radius: 9, size: 26 });
-  ui.text(`${gear.rarity} · ${RARITY[gear.rarity].name}${canBuy || owned ? '' : ' · 还差 ❄' + (gear.unlock.cost - p.coins)}`,
+  ui.text(`${rarityToken(gear.rarity)} ${RARITY[gear.rarity].name}${canBuy || owned ? '' : ' · 还差 ❄' + (gear.unlock.cost - p.coins)}`,
     info.x + 75, info.y + 21, { size: 11, color: PALE, bold: true });
   ui.text(gear.name, info.x + 76, info.y + 48, { size: 22, bold: true, max: info.w - 220 });
   ui.paragraph(gear.desc, info.x + 14, info.y + 80, info.w - 28, { size: 13, lines: 2 });
@@ -385,7 +385,7 @@ function shop(ui, panel, _, __, g) {
     const x = ui.w / 2 - 203, y = ui.h / 2 - 131;
     card(ui, { x, y, w: 406, h: 262 }, ['#ff5c9d', '#ffad67'], { stripe: .10, radius: 18 });
     ui.text(item.icon, x + 203, y + 65, { center: true, size: 55 });
-    ui.text(item.name, x + 203, y + 124, { center: true, size: 31, italic: true, bold: true, outline: true });
+    ui.text(`${rarityToken(ui.boxWin.tier)} ${item.name}`, x + 203, y + 124, { center: true, size: 31, italic: true, bold: true, outline: true, max: 360 });
     if (ui.boxWin.dup) ui.text(`重复获得，返还 ❄ ${BOX_REFUND}`, x + 203, y + 159, { center: true, size: 15, bold: true });
     const close = () => { ui.boxWin = null; g.setShow('SHOP', id); ui.invalidate(); };
     ribbon(ui, '确定', { x: x + 23, y: y + 189, w: 172, h: 49 }, close);
