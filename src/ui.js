@@ -14,6 +14,7 @@ import { hudMethods } from './ui/hud.js';
 import { resultsMethods } from './ui/results.js';
 import { FEAT, trackFeats, trackArt } from './ui/trackArt.js';
 import { tuneHtml } from './ui/tune.js';
+import { garageStep } from './ui/garage-catalog-state.js';
 import { $, hex, esc, TIER_ICONS, SHOW, cosmeticOf, THEME_ICON, MODE_STYLE } from './ui/common.js';
 export { esc } from './ui/common.js';
 
@@ -121,6 +122,11 @@ export class UI {
     document.addEventListener('click', (e) => this.playClick(e), true);
     // Esc：和左上角的返回一样一层层往回退；已经在首页时取消匹配
     window.addEventListener('keydown', (e) => {
+      // 车库属性页：← → 切到上一件 / 下一件装备（光标在输入框里时不管）
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.target.closest?.('input, select, textarea')) {
+        if (this.tab === 'garage' && this.sub.garage !== 'up' && !$('menu').classList.contains('hidden')) this.stepGarage(e.key === 'ArrowLeft' ? -1 : 1);
+        return;
+      }
       if (e.key !== 'Escape') return;
       const acc = $('account');
       if (acc && !acc.classList.contains('hidden')) return;
@@ -834,7 +840,21 @@ export class UI {
       act += `<button class="sbtn main off" data-act="locked" data-why="${esc(why)}"><b>未解锁</b><i>${G.unlock.lv ? `Lv.${G.unlock.lv}` : 'LOCKED'}</i></button>`;
     }
     const head = { badge: G.icon, small: `${G.rarity} · ${rare.name} · ${state}`, name: G.name, side: `改装 <b>${upSum}</b> / ${UP_KEYS.length * UP_MAX}` };
-    return this.showHtml('garage', head, gearTags(G), body, `<div class="spick gpick"><div class="granks">${chips}</div><div class="glist" data-rank="${rank}" title="按住左右拖动，可以翻看更多装备">${pick}</div></div>`, act);
+    // 展台左右两个按钮：切到上一件 / 下一件
+    const steps = sub === 'up' ? '' : '<div class="gstep"><button class="prev" data-act="garageStep" data-dir="-1" aria-label="上一件装备" title="上一件（←）"></button>' +
+      '<button class="next" data-act="garageStep" data-dir="1" aria-label="下一件装备" title="下一件（→）"></button></div>';
+    return this.showHtml('garage', head, gearTags(G), body, `<div class="spick gpick"><div class="granks">${chips}</div><div class="glist" data-rank="${rank}" title="按住左右拖动，可以翻看更多装备">${pick}</div></div>${steps}`, act);
+  }
+
+  // 车库换到上一件 / 下一件（目录有筛选时按筛选和排序走），下面的装备条跟着换到那一档
+  stepGarage(dir) {
+    const cur = GEAR[this.viewGear] ? this.viewGear : this.game.look.gear;
+    this.viewGear = garageStep(this.game, this.garageCatalog || {}, cur, dir);
+    this.gearRank = GEAR[this.viewGear].rarity || 'C';
+    this.upSel = null;
+    this.pendingBuy = null;
+    this.renderTab('garage');
+    this.applyShow();
   }
 
   lookHtml() {
@@ -903,6 +923,7 @@ export class UI {
       this.applyShow();
       return;
     }
+    if (act === 'garageStep') return this.stepGarage(Number(b.dataset.dir));
     // 车库：换一档稀有度，展台跟着换成这一档的第一件
     if (act === 'rank') {
       this.pendingBuy = null;

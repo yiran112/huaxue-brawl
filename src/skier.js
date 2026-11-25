@@ -6,6 +6,7 @@ import { clamp, lerp, damp } from './util.js';
 import { SKINS } from './config.js';
 import { GEAR, rarityRank } from './gear.js';
 import { GEAR_MODELS, gearKit, bakeGear } from './gearModels.js';
+import { outfitKit, buildHat, buildGoggles, buildBack, buildScarf } from './outfitModels.js';
 
 const matCache = new Map();
 export function lam(color, opts) {
@@ -26,27 +27,12 @@ const GEO = {
   rounded: new RoundedBoxGeometry(1, 1, 1, 1, 0.19),
   cyl: new THREE.CylinderGeometry(1, 1, 1, 10),
   cone: new THREE.ConeGeometry(1, 1, 10),
-  beanieBrim: profile([[0.249, 0.107], [0.269, 0.112], [0.273, 0.129], [0.272, 0.145]]),
-  beanieBand: profile([[0.272, 0.145], [0.272, 0.153], [0.267, 0.158]]),
-  beanieCap: profile([[0.267, 0.158], [0.264, 0.181], [0.244, 0.226], [0.205, 0.273], [0.144, 0.307], [0.074, 0.328], [0, 0.337]]),
   jacket: profile([[0, 0.065], [0.205, 0.065], [0.234, 0.1], [0.241, 0.21], [0.27, 0.42], [0.261, 0.48], [0.232, 0.535], [0.17, 0.58], [0, 0.58]]),
   yoke: profile([[0.271, 0.434], [0.265, 0.483], [0.235, 0.538], [0.18, 0.579]]),
   half: new THREE.SphereGeometry(1, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
   chunk: new THREE.IcosahedronGeometry(1, 0),
   shard: new THREE.ConeGeometry(1, 1, 5),
 };
-const visor = new THREE.SphereGeometry(1, 18, 12);
-const visorColor = [];
-const visorPos = visor.attributes.position;
-for (let i = 0; i < visorPos.count; i++) {
-  const x = visorPos.getX(i);
-  const y = visorPos.getY(i);
-  const glint = Math.max(0, 1 - Math.abs(y - 0.43 + x * 0.39) * 3.2) * 0.43;
-  const light = 0.44 + (y + 1) * 0.19 + glint;
-  visorColor.push(light, light, light);
-}
-visor.setAttribute('color', new THREE.Float32BufferAttribute(visorColor, 3));
-GEO.visor = visor;
 const Y = new THREE.Vector3(0, 1, 0);
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -100,14 +86,6 @@ function costumeMesh(parts) {
   return result;
 }
 
-function skiGoggles(head, color, frame, strapRadius = 0.263) {
-  head.add(mesh('cyl', frame, strapRadius, 0.052, strapRadius, 0, 0.065, 0));
-  head.add(mesh('sphere', frame, 0.235, 0.099, 0.087, 0, 0.055, -0.212));
-  const lens = mesh('visor', color, 0.212, 0.073, 0.079, 0, 0.059, -0.236, { vertexColors: true, emissive: color, emissiveIntensity: 0.1 });
-  lens.castShadow = false;
-  head.add(lens);
-}
-
 function snowJacket(look) {
   const hardware = 0x253749;
   const fabricShade = new THREE.Color(look.jacket).multiplyScalar(0.57).getHex();
@@ -155,95 +133,6 @@ function skierFace(look, skin) {
   }
   if (!look.mustache) parts.push(mesh('sphere', 0x873d3b, 0.047, 0.017, 0.016, 0, -0.107, -0.231));
   return costumeMesh(parts);
-}
-
-function buildHat(head, look) {
-  const c = look.hatColor;
-  const hairDark = 0x2a1a12;
-  switch (look.hat) {
-    case 0: { // 毛线帽
-      const cap = mesh('beanieCap', c);
-      const brim = mesh('beanieBrim', 0xe3ebef);
-      const cuff = mesh('beanieBand', c);
-      const pom = mesh('sphere', c, 0.09, 0.083, 0.09, 0, 0.33, 0);
-      head.add(cap, brim, cuff, pom);
-      break;
-    }
-    case 1: { // 平头 + 头带
-      head.add(mesh('box', 0x16161a, 0.42, 0.22, 0.4, 0, 0.26, 0.01));
-      head.add(mesh('cyl', c === 0x1a1a1a ? 0xff3d6e : c, 0.262, 0.06, 0.262, 0, 0.1, 0));
-      break;
-    }
-    case 2: { // 莫西干
-      for (let i = 0; i < 5; i++) {
-        head.add(mesh('box', c, 0.1, 0.2 - Math.abs(i - 2) * 0.03, 0.12, 0, 0.3, -0.2 + i * 0.1));
-      }
-      head.add(mesh('half', c, 0.258, 0.2, 0.258, 0, 0.06, 0));
-      break;
-    }
-    case 3: { // 长发 + 胡子
-      head.add(mesh('half', hairDark, 0.275, 0.25, 0.275, 0, 0.04, 0));
-      head.add(mesh('box', hairDark, 0.5, 0.36, 0.16, 0, -0.08, 0.17));
-      head.add(mesh('box', hairDark, 0.3, 0.14, 0.1, 0, -0.17, -0.2));
-      break;
-    }
-    case 4: { // 头盔 + 护目镜
-      head.add(mesh('half', c, 0.284, 0.24, 0.284, 0, 0.079, 0));
-      head.add(mesh('rounded', 0x243647, 0.098, 0.042, 0.115, 0, 0.265, 0.13));
-      if (!look.goggles) skiGoggles(head, 0xffaa45, 0x243647, 0.296);
-      break;
-    }
-    case 5: { // 爆炸头
-      head.add(mesh('sphere', hairDark, 0.35, 0.28, 0.32, 0, 0.21, 0.09));
-      head.add(mesh('cyl', 0xff3d6e, 0.265, 0.05, 0.265, 0, 0.08, 0));
-      break;
-    }
-    case 6: { // 礼帽
-      head.add(mesh('cyl', c, 0.36, 0.03, 0.36, 0, 0.19, 0));
-      head.add(mesh('cyl', c, 0.22, 0.32, 0.22, 0, 0.35, 0));
-      head.add(mesh('cyl', 0xff3d6e, 0.225, 0.05, 0.225, 0, 0.24, 0));
-      break;
-    }
-    default: { // 绿毛
-      head.add(mesh('half', c, 0.28, 0.3, 0.28, 0, 0.03, 0));
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2;
-        const sp = mesh('cone', c, 0.07, 0.2, 0.07, Math.cos(a) * 0.17, 0.3, Math.sin(a) * 0.17);
-        sp.rotation.set(Math.sin(a) * 0.6, 0, -Math.cos(a) * 0.6);
-        head.add(sp);
-      }
-      break;
-    }
-  }
-}
-
-function buildGoggles(head, kind) {
-  switch (kind) {
-    case 1: // 橙色雪镜
-      skiGoggles(head, 0xffaa45, 0x203143);
-      break;
-    case 2: // 墨镜
-      head.add(mesh('box', 0x111118, 0.4, 0.025, 0.025, 0, 0.075, -0.255));
-      for (const sx of [-1, 1]) {
-        head.add(mesh('box', 0x111118, 0.135, 0.085, 0.025, sx * 0.095, 0.045, -0.258));
-        head.add(mesh('box', 0x111118, 0.02, 0.02, 0.22, sx * 0.205, 0.07, -0.15));
-      }
-      break;
-    case 3: // 心形眼镜
-      for (const sx of [-1, 1]) {
-        const x = sx * 0.095;
-        head.add(mesh('sphere', 0xff4fa0, 0.042, 0.042, 0.02, x - 0.026, 0.062, -0.258));
-        head.add(mesh('sphere', 0xff4fa0, 0.042, 0.042, 0.02, x + 0.026, 0.062, -0.258));
-        const tip = mesh('box', 0xff4fa0, 0.06, 0.06, 0.02, x, 0.035, -0.258);
-        tip.rotation.z = Math.PI / 4;
-        head.add(tip);
-      }
-      head.add(mesh('box', 0xff4fa0, 0.06, 0.015, 0.015, 0, 0.06, -0.258));
-      break;
-    case 4: // 电竞护目镜
-      skiGoggles(head, 0x58e7ff, 0x1b314c);
-      break;
-  }
 }
 
 const GEAR_IDS = new Set(Object.keys(GEAR));
@@ -349,10 +238,19 @@ export class Skier {
     const face = skierFace(L, skin);
     this.ownGeos.push(face.geometry);
     this.head.add(face);
-    buildHat(this.head, L);
-    buildGoggles(this.head, L.goggles | 0);
+    // 装扮的造型在 outfitModels.js；合并出来的几何体归这个角色，销毁时一起释放。
+    // 护目镜、背饰、围巾各挂一个自己的组，合并时不会把头和衣服一起合进去
+    const outfit = (this.outfit = outfitKit(lam));
+    buildHat(this.head, L, outfit);
+    this.eyewear = new THREE.Group();
+    this.head.add(this.eyewear);
+    buildGoggles(this.eyewear, L.goggles | 0, outfit);
+    this.backwear = new THREE.Group();
+    this.neckwear = new THREE.Group();
+    this.torso.add(this.backwear, this.neckwear);
     this.buildBack(L.back | 0, L);
     this.buildScarf(L.scarf | 0, L);
+    this.ownGeos.push(...outfit.own);
 
     // 手臂 + 雪杖
     this.arms = [];
@@ -460,77 +358,16 @@ export class Skier {
     this.group.add(this.ice);
   }
 
+  // 背饰：披风随速度飘、翅膀在空中扇、火箭背包加速时喷火（animateExtras 里动）
   buildBack(kind, L) {
-    const t = this.torso;
-    this.cape = null;
-    this.wings = null;
-    this.jetFlames = null;
-    switch (kind) {
-      case 1: // 双肩包
-        t.add(mesh('box', L.stripe, 0.36, 0.4, 0.16, 0, 0.32, 0.3));
-        t.add(mesh('box', 0x2b2f3a, 0.37, 0.07, 0.17, 0, 0.52, 0.3));
-        for (const sx of [-1, 1]) t.add(mesh('box', 0x2b2f3a, 0.05, 0.05, 0.42, sx * 0.13, 0.55, 0.08));
-        break;
-      case 2: { // 超人披风
-        const cape = (this.cape = new THREE.Group());
-        cape.position.set(0, 0.58, 0.2);
-        cape.add(mesh('box', 0xe0222a, 0.56, 0.9, 0.03, 0, -0.45, 0));
-        cape.add(mesh('box', 0xffd23c, 0.58, 0.06, 0.04, 0, -0.02, 0));
-        t.add(cape);
-        break;
-      }
-      case 3: { // 火箭背包
-        this.jetFlames = [];
-        for (const sx of [-1, 1]) {
-          t.add(mesh('cyl', 0xc8ccd6, 0.09, 0.42, 0.09, sx * 0.1, 0.32, 0.32));
-          t.add(mesh('cone', 0xe0263c, 0.09, 0.14, 0.09, sx * 0.1, 0.6, 0.32));
-          t.add(mesh('cyl', 0x3a3f47, 0.06, 0.08, 0.06, sx * 0.1, 0.08, 0.32));
-          const fl = new THREE.Mesh(GEO.cone, new THREE.MeshBasicMaterial({ color: 0xffa020, transparent: true, opacity: 0.85, depthWrite: false }));
-          fl.scale.set(0.07, 0.35, 0.07);
-          fl.rotation.x = Math.PI;
-          fl.position.set(sx * 0.1, -0.13, 0.32);
-          fl.visible = false;
-          t.add(fl);
-          this.jetFlames.push(fl);
-        }
-        t.add(mesh('box', 0x6f7883, 0.12, 0.3, 0.06, 0, 0.32, 0.27));
-        break;
-      }
-      case 4: { // 天使翅膀
-        this.wings = [];
-        for (const sx of [-1, 1]) {
-          const w = new THREE.Group();
-          w.position.set(sx * 0.08, 0.46, 0.27);
-          w.rotation.z = sx * 0.35;
-          w.add(mesh('box', 0xffffff, 0.55, 0.28, 0.035, sx * 0.29, 0.06, 0, { emissive: 0x334455 }));
-          w.add(mesh('box', 0xf2f6ff, 0.4, 0.2, 0.035, sx * 0.24, -0.16, 0.01, { emissive: 0x334455 }));
-          t.add(w);
-          this.wings.push(w);
-        }
-        break;
-      }
-      case 5: { // 冠军奖杯
-        const gold = { emissive: 0x553300 };
-        t.add(mesh('box', 0x2b2f3a, 0.2, 0.08, 0.16, 0, 0.3, 0.3));
-        t.add(mesh('cone', 0xffc81f, 0.07, 0.14, 0.07, 0, 0.4, 0.33, gold));
-        t.add(mesh('cyl', 0xffc81f, 0.14, 0.2, 0.14, 0, 0.56, 0.33, gold));
-        for (const sx of [-1, 1]) t.add(mesh('box', 0xffc81f, 0.05, 0.12, 0.03, sx * 0.17, 0.57, 0.33, gold));
-        break;
-      }
-    }
+    const { cape, wings, jetFlames } = buildBack(this.backwear, kind, L, this.outfit);
+    this.cape = cape;
+    this.wings = wings;
+    this.jetFlames = jetFlames;
   }
 
   buildScarf(kind, L) {
-    this.scarfTail = null;
-    if (!kind) return;
-    const t = this.torso;
-    t.add(mesh('cyl', L.stripe, 0.175, 0.1, 0.165, 0, 0.6, 0));
-    const len = kind === 2 ? 0.62 : 0.32;
-    const tail = (this.scarfTail = new THREE.Group());
-    tail.position.set(0.08, 0.6, 0.14);
-    tail.add(mesh('box', L.stripe, 0.09, 0.03, len, 0, 0, len / 2));
-    tail.add(mesh('box', 0xffffff, 0.095, 0.035, 0.05, 0, 0, len - 0.03));
-    t.add(tail);
+    this.scarfTail = buildScarf(this.neckwear, kind, L, this.outfit);
   }
 
   // 团队赛：背上插一面队旗
@@ -732,7 +569,7 @@ export class Skier {
     const v = clamp(s.speed / 35, 0, 1);
     if (this.cape) this.cape.rotation.x = -(0.2 + v * 1.0) + Math.sin(t * 13) * 0.07 * (0.3 + v);
     if (this.scarfTail) {
-      this.scarfTail.rotation.x = -0.9 + v * 0.75 + Math.sin(t * 17) * 0.12 * v;
+      this.scarfTail.rotation.x = 1.2 - v * 1.35 + Math.sin(t * 17) * 0.12 * v; // 站着时垂在背后，越快越往后飘
       this.scarfTail.rotation.y = Math.sin(t * 11) * 0.3 * v;
     }
     if (this.teamCloth) this.teamCloth.rotation.y = Math.sin(t * 12) * 0.25 * (0.3 + v);

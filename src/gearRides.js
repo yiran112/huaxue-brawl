@@ -2,7 +2,7 @@
 // 拼法和 gearModels.js 一样：放样的板面 + 弯管 + 旋转体，再贴程序画的图案。
 import * as THREE from 'three';
 import {
-  CORD, HULL, PRIM, geo, put, box, ball, knob, soft, strut, rod, pipeGeo, mirrorX, lathe, plateGeo, ringOf, radialGeo, studsGeo, loftGeo, skiStations,
+  CORD, HULL, PRIM, geo, put, box, ball, knob, soft, strut, rod, pipeGeo, mirrorX, lathe, latheSkin, plateGeo, ringOf, radialGeo, studsGeo, loftGeo, skiStations,
   inlay, under, sample, sampleEnds, skin, sticker, flame, glowMat, shade,
 } from './gearParts.js';
 import { decalMat, INK, WHITE, rect, poly, line, circle, ring, round, text, star, chevrons, hazard, warn, grain, scales, dotRow, css, rng } from './gearDecals.js';
@@ -17,16 +17,6 @@ function tubeSkin(p, key, R, r, y, repeat, paint) {
   const g = geo(`tubeSkin:${R}:${r}`, () => new THREE.TorusGeometry(R, r + 0.003, 14, 40).rotateX(-HALF_PI));
   const W = (Math.PI * 2 * R) / repeat;
   return soft(put(p, g, decalMat(key, W, Math.PI * 2 * r, paint, { px: 256, py: 256, repeat }), 0, y, 0));
-}
-
-// 旋转体的一圈外皮：pts 是要盖住的那段轮廓（和原轮廓同向、往外抬一点），图案沿圆周重复 repeat 次。
-// 画布纵向 y = 0 是轮廓最后一个点、L 是第一个点
-function latheSkin(p, key, pts, repeat, paint, opts) {
-  const g = geo('latheSkin:' + key, () => lathe(pts, 48));
-  let len = 0;
-  for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-  const mid = pts.reduce((s, q) => s + q[0], 0) / pts.length;
-  return soft(put(p, g, decalMat(key, (Math.PI * 2 * mid) / repeat, len, paint, { px: 256, py: 128, repeat, ...opts })));
 }
 
 // ---------- 雪橇 ----------

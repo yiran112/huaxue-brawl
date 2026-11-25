@@ -252,6 +252,16 @@ export function skin(p, key, list, W, paint, opts) {
   return soft(put(p, g, decalMat(key, W, g.userData.len, paint, opts)));
 }
 
+// 旋转体的一圈外皮：pts 是要盖住的那段轮廓（和原轮廓同向、往外抬一点），图案沿圆周重复 repeat 次。
+// 画布纵向 y = 0 是轮廓最后一个点、L 是第一个点
+export function latheSkin(p, key, pts, repeat, paint, opts) {
+  const g = geo('latheSkin:' + key, () => lathe(pts, 48));
+  let len = 0;
+  for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  const mid = pts.reduce((s, q) => s + q[0], 0) / pts.length;
+  return soft(put(p, g, decalMat(key, (Math.PI * 2 * mid) / repeat, len, paint, { px: 256, py: 128, repeat, ...opts })));
+}
+
 // 一张贴纸：w × h 米的小平面，正面朝 +Z，图案画法同 skin（y 从上边 0 往下到 h）
 export function sticker(p, key, w, h, paint, opts) {
   const g = geo(`sticker:${w}:${h}`, () => new THREE.PlaneGeometry(w, h));

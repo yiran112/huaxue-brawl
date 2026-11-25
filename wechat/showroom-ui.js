@@ -7,6 +7,7 @@ import { ACHIEVEMENTS, CUP_LV, STAT_LABELS } from '../src/profile.js';
 import { CUPS } from '../src/tracks.js';
 import { SHOW, cosmeticOf, hex } from '../src/ui/common.js';
 import { card, chip, gradient, hit, meter, pageHeader, scrim, GOLD, NAVY, PALE, ribbon } from './paint.js';
+import { garageStep } from '../src/ui/garage-catalog-state.js';
 
 const TITLES = { garage: '车库', look: '角色', growth: '成长', shop: '商城' };
 const RARE = { C: '#cde2ff', B: '#79edcb', A: '#d9a7ff', S: '#ffd569' };
@@ -247,6 +248,17 @@ function garage(ui, panel, sub, _, g) {
     if (shop) { ui.openTab('shop'); gearPick(ui, id, true); ui.page(gear.rarity); return; }
     tryBuy(ui, gear.unlock, key, () => g.setLook('gear', id));
   }, { sub: en, primary: true, muted: equipped || (!shop && st === 'locked') });
+  if (sub === 'up') return;
+  // 展台左右两个圆按钮：切到上一件 / 下一件
+  const step = (dir) => {
+    ui.upSel = null;
+    gearPick(ui, garageStep(g, ui.garageCatalog || {}, id, dir));
+  };
+  const size = 50;
+  const cy = (ui.t + ui.b) / 2;
+  for (const [x, glyph, dir] of [[ui.l + 162, '‹', -1], [panel.x - 14 - size, '›', 1]]) {
+    chip(ui, glyph, { x, y: cy - size / 2, w: size, h: size }, () => step(dir), { fill: 'rgba(12,28,76,.66)', radius: size / 2, size: 34 });
+  }
 }
 
 function listChoices(ui, label, x, y, w, options) {

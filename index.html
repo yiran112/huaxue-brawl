@@ -686,6 +686,16 @@
   /* 中间的空地：按住拖动可以转动角色 */
   .sdrag { grid-column: 1 / 3; grid-row: 2; cursor: grab; touch-action: none; }
   .sdrag:active { cursor: grabbing; }
+  /* 车库详情：展台左右两个切换装备的圆按钮。叠在拖动区上面，只有按钮本身挡住拖动 */
+  .gstep { grid-column: 2; grid-row: 2; align-self: center; display: flex; justify-content: space-between; padding: 0 clamp(8px, 2vw, 30px); pointer-events: none; }
+  .gstep button { pointer-events: auto; width: clamp(44px, 4vw, 58px); aspect-ratio: 1; display: grid; place-items: center; border-radius: 50%;
+    background: rgba(12, 28, 76, .62); border: 2px solid rgba(160, 215, 255, .75); box-shadow: 0 0 16px rgba(63, 200, 255, .35);
+    backdrop-filter: blur(4px); transition: transform .12s, background .12s; }
+  .gstep button::before { content: ''; width: 32%; aspect-ratio: 1; border: solid #fff; border-width: 0 0 4px 4px; }
+  .gstep .prev::before { transform: translateX(15%) rotate(45deg); }
+  .gstep .next::before { transform: translateX(-15%) rotate(-135deg); }
+  .gstep button:hover { background: rgba(47, 107, 255, .8); transform: scale(1.08); }
+  .gstep button:active { transform: scale(.94); }
   /* 竖排子页签：贴着屏幕左边，选中的一条是亮的 */
   .snav { grid-column: 1; grid-row: 2; align-self: start; justify-self: start; width: clamp(150px, 12vw, 210px); margin: 14px 0 0 -18px;
     display: flex; flex-direction: column; }

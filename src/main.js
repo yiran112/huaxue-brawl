@@ -602,8 +602,8 @@ export class Game {
     if (!room) return;
     if (on) {
       room.setLabel(this.showLabel);
-      // 车库里看装备：台上不摆人，只摆放大了的装备
-      const gearOnly = !!this.showGear && this.showLabel === 'GARAGE';
+      // 车库、商城里看装备：台上不摆人，只摆放大了的装备（商城开箱试穿外观时还是摆人）
+      const gearOnly = this.showLabel === 'GARAGE' || (this.showLabel === 'SHOP' && !this.showPatch);
       room.setLook({ ...this.look, ...(this.showGear ? { gear: this.showGear } : null), ...this.showPatch }, gearOnly);
       if (!room.group.visible) {
         // 放到起点上空很高的地方，四周的山够不着
