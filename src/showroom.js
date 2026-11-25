@@ -11,12 +11,45 @@ export const STAGE_TOP = 0.34; // 展台台面离地高度
 // 角色默认朝向：面对镜头（镜头在 +Z 一侧），再侧过去一点
 const FACE = Math.PI - 0.62;
 // 车库里只摆装备时：侧得更多（看得到整条板），最长的一边放大到 GEAR_SIZE 米，
-// 悬在台面上方 GEAR_LIFT，往镜头这边倾 GEAR_TILT，板面上的图案看得清
+// 往镜头这边倾 GEAR_TILT，板面上的图案看得清；悬多高按装备的样子算（见 placeGear），上下浮动 GEAR_BOB
 const GEAR_FACE = Math.PI - 1.05;
 const GEAR_SIZE = 4.2;
-const GEAR_LIFT = 0.8;
-const GEAR_TILT = 0.32;
+export const GEAR_TILT = 0.32;
+export const GEAR_BOB = 0.05;
+export const GEAR_CLEAR = 0.15; // 转到哪个方向、浮到最低，离台面也至少留这么高
 const HOLO_FONT = 'italic 900 168px "Arial Black", Impact, "Microsoft YaHei", sans-serif';
+
+// 只摆装备时的摆法：包围盒中心对准转轴，最长的一边放大到 GEAR_SIZE。
+// 圆的（雪圈、飞碟）宽和长差不多，同样长度看着大一圈，按宽的 1.5 倍算。
+// 往镜头倾以后，朝着镜头的那一头会往下沉：顶点离转轴的水平距离是 r，不管转到哪个方向最多沉 r·sin(倾角)。
+// 按沉得最深的顶点把装备抬起来，左右拖着转一整圈也碰不到台面（高的载具抬得多，扁的板子抬得少）。
+// 返回 lift：支架离台面多高；top：转一圈装备最高能到离台面多高，镜头按它框
+const _v = new THREE.Vector3();
+export function placeGear(root) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const c = box.getCenter(new THREE.Vector3());
+  const k = GEAR_SIZE / Math.max(size.x, size.z, Math.min(size.x, size.z) * 1.5);
+  const cos = Math.cos(GEAR_TILT);
+  const sin = Math.sin(GEAR_TILT);
+  let sink = 0;
+  let rise = 0;
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const pos = o.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      _v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld).sub(c).multiplyScalar(k);
+      const r = Math.hypot(_v.x, _v.z) * sin;
+      sink = Math.max(sink, r - _v.y * cos);
+      rise = Math.max(rise, r + _v.y * cos);
+    }
+  });
+  root.scale.setScalar(k);
+  root.position.copy(c).multiplyScalar(-k);
+  const lift = sink + GEAR_BOB + GEAR_CLEAR;
+  return { lift, top: lift + GEAR_BOB + rise };
+}
 
 const basic = (opts) => new THREE.MeshBasicMaterial({ fog: false, ...opts });
 const glow = (opts) => basic({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, ...opts });
@@ -172,12 +205,14 @@ export class Showroom {
 
     // 只摆装备时的支架：往镜头倾，里面一层跟着转台转
     this.stand = new THREE.Group();
-    this.stand.position.y = STAGE_TOP + GEAR_LIFT;
+    this.stand.position.y = STAGE_TOP;
     this.stand.rotation.x = GEAR_TILT;
     this.spinner = new THREE.Group();
     this.stand.add(this.spinner);
     g.add(this.stand);
     this.gear = null;
+    this.gearLift = 0;
+    this.gearTop = 0;
   }
 
   // 换装备、换造型后重新拼一个角色。gearOnly：不摆人，只把装备放大了悬在台上（车库看装备）
@@ -193,15 +228,11 @@ export class Showroom {
       this.turn.add(this.skier.group);
       return;
     }
-    // 从拼好的角色身上把装备摘下来；包围盒中心对准转轴，最长的一边放大到 GEAR_SIZE。
-    // 圆的（雪圈、飞碟）宽和长差不多，同样长度看着大一圈，按宽的 1.5 倍算
+    // 从拼好的角色身上把装备摘下来，放大、抬高到倾过来也碰不到台面
     const { root, skier } = makeGearPreview(look.gear, look);
-    const box = new THREE.Box3().setFromObject(root);
-    const size = box.getSize(new THREE.Vector3());
-    const c = box.getCenter(new THREE.Vector3());
-    const k = GEAR_SIZE / Math.max(size.x, size.z, Math.min(size.x, size.z) * 1.5);
-    root.scale.setScalar(k);
-    root.position.copy(c).multiplyScalar(-k);
+    const { lift, top } = placeGear(root);
+    this.gearLift = lift;
+    this.gearTop = top;
     this.spinner.add(root);
     this.skier = skier;
     this.gear = root;
@@ -251,7 +282,7 @@ export class Showroom {
     if (this.gear) {
       // 只摆装备：慢慢上下浮动，会转的灯圈照样转；脚下那团阴影跟着装备一起转
       this.spinner.rotation.y = GEAR_FACE + this.yaw + Math.sin(t * 0.4) * 0.12;
-      this.stand.position.y = STAGE_TOP + GEAR_LIFT + Math.sin(t * 1.3) * 0.05;
+      this.stand.position.y = STAGE_TOP + this.gearLift + Math.sin(t * 1.3) * GEAR_BOB;
       for (const s of this.skier.gearFx.spin) s.rotation.y += s.userData.spin * dt;
       this.turn.rotation.y = this.spinner.rotation.y;
     } else {

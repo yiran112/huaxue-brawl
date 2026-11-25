@@ -2330,10 +2330,13 @@ export class Game {
     room.update(dt);
     const p = room.group.position;
     const cam = this.camera;
-    // 车库只摆装备时框得比整个人小一圈，装备显得大
-    const lc = room.gear ? this.frameCam(dt, 5.2, 3.2, 4, 14) : this.frameCam(dt, SHOW_W, SHOW_H, 4.5, 14);
+    // 车库只摆装备时框得比整个人小一圈，装备显得大。
+    // 高的载具倾过来要抬得更高：镜头对准台面到装备最高点的中间，框的高度也跟着放，上下各留一点边
+    const lc = room.gear ? this.frameCam(dt, 5.2, Math.max(3.2, room.gearTop + 0.6), 4, 14) : this.frameCam(dt, SHOW_W, SHOW_H, 4.5, 14);
+    const aim = room.gear ? Math.max(0.9, room.gearTop / 2) : 0.9;
+    this.showAim = this.showAim === undefined ? aim : lerp(this.showAim, aim, damp(5, dt));
     const ax = p.x + lc.x;
-    const ay = p.y + STAGE_TOP + 0.9 + lc.y;
+    const ay = p.y + STAGE_TOP + this.showAim + lc.y;
     cam.position.set(ax + Math.sin(this.time * 0.3) * 0.3, ay + lc.dist * 0.13, p.z + lc.dist);
     cam.lookAt(ax, ay, p.z);
     this.hemi.color.set(0xb4c8ff);
