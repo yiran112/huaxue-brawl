@@ -10,6 +10,18 @@ import { card, chip, gradient, hit, meter, pageHeader, scrim, GOLD, NAVY, PALE, 
 
 const TITLES = { garage: '车库', look: '角色', growth: '成长', shop: '商城' };
 const RARE = { C: '#cde2ff', B: '#79edcb', A: '#d9a7ff', S: '#ffd569' };
+const SHELF_COLUMNS = 2;
+const SHELF_TILE_HEIGHT = 111;
+const SHELF_GAP = 8;
+const SHELF_HEADER = 25;
+const SHELVES = RARITY_KEYS.map((rarity) => ({
+  rarity, gear: SHOP_GEAR.filter((key) => GEAR[key].rarity === rarity),
+})).filter((shelf) => shelf.gear.length);
+let shopHeight = 150;
+for (const shelf of SHELVES) {
+  shelf.y = shopHeight;
+  shopHeight += SHELF_HEADER + Math.ceil(shelf.gear.length / SHELF_COLUMNS) * (SHELF_TILE_HEIGHT + SHELF_GAP) + 5;
+}
 
 const subOf = (ui) => ui.panelPage || SHOW[ui.tab].subs[0][0];
 
@@ -17,11 +29,14 @@ function showroom(ui, render) {
   const { w, r, l, b, t } = ui;
   const g = ui.game;
   const shop = ui.tab === 'shop';
+  const current = subOf(ui);
+  const career = ui.tab === 'growth' && current !== 'home';
   scrim(ui, gradient(ui.ctx, 0, 0, w, 0, 'rgba(3,8,28,.67)', 'rgba(3,8,28,0)', 'rgba(3,8,28,.24)'));
   const y = pageHeader(ui, TITLES[ui.tab], () => ui.back(), { parts: ui.tab === 'garage' });
-  const rw = shop ? Math.min(w * .365, 640) : Math.max(300, Math.min(420, w * .24));
+  const rw = shop ? Math.min(w * .365, 640)
+    : career ? Math.max(352, Math.min(440, (r - l) * .36))
+      : Math.max(300, Math.min(420, w * .24));
   const x = r - rw;
-  const current = subOf(ui);
   SHOW[ui.tab].subs.forEach(([id, name, en], i) => {
     const row = { x: 0, y: y + 14 + i * 61, w: 150 + Math.max(0, l - 14), h: 61 };
     const selected = current === id;
@@ -41,11 +56,11 @@ function showroom(ui, render) {
       ui.pendingBuy = null;
       ui.page(id);
       if (shop) {
-        ui.offsets.set('shop', id === 'box' ? 0 : id === 'A' ? 236 : 236 + SHOP_GEAR.filter((key) => GEAR[key].rarity === 'A').length * 170);
+        ui.offsets.set('shop', SHELVES.find((shelf) => shelf.rarity === id)?.y ?? 0);
       }
     });
   });
-  const stage = { x: l + 140, y, w: x - l - 154, h: b - y - (ui.tab === 'look' ? 0 : 147) };
+  const stage = { x: l + 140, y, w: x - l - 154, h: b - y - (ui.tab === 'look' || career ? 0 : 147) };
   ui.frame = stage;
   ui.gestures.push({ ...stage, orbit: true });
   render(ui, { x, y, w: rw, h: b - y }, current, t, g);
@@ -264,6 +279,8 @@ function looks(ui, panel, sub, _, g) {
   const p = g.profile, L = g.look;
   const body = infoPanel(ui, panel, { badge: '🎨', small: '角色造型', title: g.playerName, side: GEAR[L.gear].icon + ' ' + GEAR[L.gear].name });
   tag(ui, HATS[L.hat], body.x, body.y, '#d17a20');
+  chip(ui, '个人资料', { x: body.x + body.w - 96, y: body.y - 4, w: 96, h: 32 },
+    () => g.account.openManage(), { size: 13 });
   body.y += 42;
   body.h -= 42;
   const assign = (field, value) => { g.setLook(field, value); ui.invalidate(); };
@@ -341,9 +358,9 @@ function growth(ui, panel, sub, _, g) {
   const body = infoPanel(ui, sub === 'home' ? { ...panel, h: panel.h - 42 } : panel, {
     badge: `Lv.${info.lv}`, small: p.data.title ? `称号「${p.data.title}」` : '还没佩戴称号', title: g.playerName, side: `❄ ${p.coins}`,
   });
-  const tasks = p.dailyTasks();
   const s = p.data.stats;
   if (sub === 'home') {
+    const tasks = p.dailyTasks();
     meter(ui, body.x, body.y + 5, body.w - 82, 8, info.need ? info.cur / info.need : 1, '#81ef97');
     ui.text(`经验 ${info.cur} / ${info.need}`, body.x + body.w, body.y + 9, { size: 12, bold: true, color: PALE, right: true });
     tag(ui, `成就 ${Object.keys(p.data.ach).length} / ${ACHIEVEMENTS.length}`, body.x, body.y + 26, '#d17a20');
@@ -374,18 +391,40 @@ function growth(ui, panel, sub, _, g) {
     levelStrip(ui, panel, p);
   } else {
     const achievements = sub === 'ach';
-    section(ui, achievements ? '成就' : '生涯数据', body.x, body.y + 8);
+    const unlocked = achievements ? ACHIEVEMENTS.filter((a) => p.data.ach[a.id]).length : 0;
+    section(ui, achievements ? '成就' : '生涯数据', body.x, body.y + 8,
+      achievements ? `${unlocked} / ${ACHIEVEMENTS.length} 已达成` : '');
     body.y += 28;
     body.h -= 28;
-    const items = achievements ? ACHIEVEMENTS.map((a) => [a.name, p.data.ach[a.id] ? a.title || '已达成' : '未达成', a])
-      : STAT_LABELS.map(([key, label]) => [label, +Number(s[key] || 0).toFixed(1)]);
-    ui.scrollArea('growth-' + sub, body, items.length * 38, (offset) => items.forEach(([name, value, a], i) => {
-      const y = body.y + i * 38 - offset;
-      if (y + 36 < body.y || y > body.y + body.h) return;
-      ui.panel(body.x, y, body.w, 34, '#ffffff13', 6, null);
-      ui.text(name, body.x + 10, y + 17, { size: 13, bold: true, max: body.w * .67 });
-      ui.text(value, body.x + body.w - 10, y + 17, { size: 12, bold: true, color: GOLD, right: true });
-      if (a) hit(ui, { x: body.x, y, w: body.w, h: 34 }, name, () => { ui.achievement = a; ui.invalidate(); });
+    const items = achievements ? ACHIEVEMENTS : STAT_LABELS;
+    const columns = body.w >= 400 ? 4 : 3;
+    const rows = Math.ceil(items.length / columns);
+    const gap = 6;
+    const width = (body.w - gap * (columns - 1)) / columns;
+    const height = achievements ? 68 : Math.max(36, Math.min(58, Math.floor((body.h - gap * (rows - 1)) / rows)));
+    const content = rows * (height + gap) - gap;
+    ui.scrollArea('growth-' + sub, body, content, (offset) => items.forEach((item, i) => {
+      const x = body.x + (i % columns) * (width + gap);
+      const y = body.y + Math.floor(i / columns) * (height + gap) - offset;
+      if (y + height <= body.y || y >= body.y + body.h) return;
+      const cx = x + width / 2;
+      if (achievements) {
+        const earned = !!p.data.ach[item.id];
+        ui.panel(x, y, width, height, earned ? '#314775' : '#202e56', 8, earned ? '#d7ac58' : '#436095');
+        ui.text(earned ? '🏅' : '🔒', cx, y + 16, { size: 19, center: true });
+        ui.text(item.name, cx, y + 38, { size: 14, bold: true, center: true, max: width - 10 });
+        ui.text(earned ? item.title || '已达成' : '未达成', cx, y + 55,
+          { size: 12, bold: true, color: earned ? GOLD : PALE, center: true, max: width - 10 });
+        hit(ui, { x, y, w: width, h: height }, item.name, () => { ui.achievement = item; ui.invalidate(); });
+      } else {
+        const [key, label] = item;
+        const [name, unit] = label.split(/[（）]/);
+        const value = +Number(s[key] || 0).toFixed(1);
+        ui.panel(x, y, width, height, '#213567', 8, '#466298');
+        ui.text(name, cx, y + height * .28, { size: 13, bold: true, center: true, color: PALE, max: width - 10 });
+        ui.text(unit ? `${value} ${unit}` : value, cx, y + height * .72,
+          { size: 17, bold: true, color: GOLD, center: true, max: width - 10 });
+      }
     }));
     if (ui.achievement) {
       const a = ui.achievement;
@@ -397,6 +436,8 @@ function growth(ui, panel, sub, _, g) {
       card(ui, { x, y, w: 400, h: 220 }, 'rgba(12,28,76,.98)', { stroke: '#7395df' });
       ui.text(a.name, x + 23, y + 44, { color: GOLD, bold: true, size: 25 });
       ui.paragraph(a.desc, x + 23, y + 86, 354, { size: 15 });
+      ui.text([p.data.ach[a.id] ? '已达成' : '未达成', a.title && `称号「${a.title}」`].filter(Boolean).join(' · '),
+        x + 23, y + 119, { size: 14, color: PALE, max: 354 });
       if (a.title && p.data.ach[a.id]) ribbon(ui, '佩戴称号', { x: x + 22, y: y + 148, w: 173, h: 49 }, () => {
         p.setTitle(a.title); ui.achievement = null; ui.invalidate();
       }, { primary: true });
@@ -413,41 +454,48 @@ function shop(ui, panel, _, __, g) {
   const { x, y, w, h } = panel;
   ui.panel(x, y, w, h, 'rgba(12,28,76,.85)', 6, '#416297');
   const list = { x: x + 15, y: y + 14, w: w - 30, h: h - 16 };
-  ui.scrollArea('shop', list, 244 + SHOP_GEAR.length * 170 + 38, (offset) => {
+  ui.scrollArea('shop', list, shopHeight, (offset) => {
     const sy = list.y - offset;
     section(ui, '雪花补给箱', list.x, sy + 12);
     tag(ui, `已收集 ${BOX_POOL.filter(({ key }) => p.boxOwned(key)).length} / ${BOX_POOL.length}`, list.x + list.w - 110, sy + 3);
-    card(ui, { x: list.x, y: sy + 34, w: list.w, h: 197 }, ['#ff4f95', '#ff9d60'], { stripe: .13, radius: 14, width: 2 });
-    ui.text('🎁', list.x + 68, sy + 132, { center: true, size: 75 });
-    const bx = list.x + 131;
-    ui.text('开箱惊喜', bx, sy + 66, { size: 28, bold: true, italic: true, outline: true });
-    ui.paragraph(`随机开出一件外观，重复的返还 ❄${BOX_REFUND}`, bx, sy + 94, list.w - 142, { size: 12, color: '#fff', bold: true, lines: 2 });
-    ui.text(`传说 ${BOX_WEIGHT.S}%  稀有 ${BOX_WEIGHT.A}%  普通 ${BOX_WEIGHT.C}%`, bx, sy + 139, { size: 11, bold: true, max: list.w - 140 });
-    ribbon(ui, '开启', { x: bx, y: sy + 165, w: list.w - 144, h: 52 }, () => {
+    card(ui, { x: list.x, y: sy + 29, w: list.w, h: 106 }, ['#ff4f95', '#ff9d60'], { stripe: .13, radius: 12, width: 2 });
+    ui.text('🎁', list.x + 40, sy + 77, { center: true, size: 44 });
+    const bx = list.x + 74;
+    ui.text('开箱惊喜', bx, sy + 48, { size: 22, bold: true, italic: true, outline: true });
+    ui.text(`随机开出一件外观，重复返还 ❄${BOX_REFUND}`, bx, sy + 68, { size: 12, bold: true, max: list.w - 86 });
+    ui.text(`传说 ${BOX_WEIGHT.S}%  稀有 ${BOX_WEIGHT.A}%  普通 ${BOX_WEIGHT.C}%`, bx, sy + 84, { size: 11, bold: true, max: list.w - 86 });
+    ui.text(`❄ ${BOX_COST}`, list.x + list.w - 143, sy + 110, { size: 14, bold: true, right: true });
+    ribbon(ui, '开启', { x: list.x + list.w - 132, y: sy + 94, w: 120, h: 32 }, () => {
       const item = p.openBox();
       if (!item) return ui.toast(p.boxDone() ? '补给箱外观已集齐' : '雪花币不足', true);
       ui.boxWin = item;
       const reward = cosmeticOf(item.key);
       g.setShow('SHOP', id, { [reward.slot]: reward.i });
       ui.invalidate();
-    }, { primary: true, muted: p.coins < BOX_COST || p.boxDone(), sub: `❄ ${BOX_COST}` });
-    let yy = sy + 261, previous;
-    for (const key of SHOP_GEAR) {
-      const item = GEAR[key];
-      if (previous !== item.rarity) {
-        section(ui, `${RARITY[item.rarity].name}装备`, list.x, yy + 10);
-        yy += 26;
-      }
-      previous = item.rarity;
-      const box = { x: list.x, y: yy, w: list.w, h: 153 };
-      yy += 170;
-      if (box.y + box.h < list.y || box.y > list.y + list.h) continue;
-      card(ui, box, ['#fff', '#e8eefb'], { radius: 13, stroke: key === id ? GOLD : '#a7c0ed', width: 2, shadow: 2 });
-      chip(ui, item.rarity, { x: box.x + 5, y: box.y + 5, w: 27, h: 20 }, null, { fill: RARE[item.rarity], color: NAVY, radius: 4, size: 13 });
-      ui.text(item.name, box.x + box.w - 11, box.y + 16, { size: 13, bold: true, color: '#536386', right: true });
-      const modelW = Math.min(box.w - 16, 240);
-      ui.models.push({ x: box.x + (box.w - modelW) / 2, y: box.y + 31, w: modelW, h: 115, gear: key });
-      hit(ui, box, item.name, () => gearPick(ui, key, true));
+    }, { primary: true, muted: p.coins < BOX_COST || p.boxDone() });
+    const tileW = (list.w - SHELF_GAP * (SHELF_COLUMNS - 1)) / SHELF_COLUMNS;
+    for (const shelf of SHELVES) {
+      const shelfY = sy + shelf.y;
+      section(ui, `${RARITY[shelf.rarity].name}装备`, list.x, shelfY + 10);
+      shelf.gear.forEach((key, i) => {
+        const box = {
+          x: list.x + (i % SHELF_COLUMNS) * (tileW + SHELF_GAP),
+          y: shelfY + SHELF_HEADER + Math.floor(i / SHELF_COLUMNS) * (SHELF_TILE_HEIGHT + SHELF_GAP),
+          w: tileW, h: SHELF_TILE_HEIGHT,
+        };
+        if (box.y + box.h <= list.y || box.y >= list.y + list.h) return;
+        const item = GEAR[key];
+        const modelH = 64;
+        const modelW = Math.min(box.w - 12, modelH * 5 / 3);
+        card(ui, box, ['#fff', '#e8eefb'], { radius: 10, stroke: key === id ? GOLD : '#a7c0ed', width: 2, shadow: 0 });
+        chip(ui, item.rarity, { x: box.x + 6, y: box.y + 5, w: 22, h: 18 }, null,
+          { fill: RARE[item.rarity], color: NAVY, radius: 4, size: 12 });
+        ui.text(item.name, box.x + 34, box.y + 14, { size: 13, bold: true, color: NAVY, max: box.w - 42 });
+        ui.models.push({ x: box.x + (box.w - modelW) / 2, y: box.y + 26, w: modelW, h: modelH, gear: key });
+        ui.text(p.gearOwned(key) ? '已拥有' : `❄ ${item.unlock.cost}`, box.x + box.w / 2, box.y + box.h - 12,
+          { size: 12, bold: true, color: '#3d4c75', center: true, max: box.w - 12 });
+        hit(ui, box, item.name, () => gearPick(ui, key, true));
+      });
     }
   });
   const infoX = ui.l + 142;

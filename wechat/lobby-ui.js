@@ -8,7 +8,7 @@ import { clamp, fmtTime } from '../src/util.js';
 import { card, chip, gradient, hit, meter, pageHeader, scrim, GOLD, NAVY, PALE, ribbon } from './paint.js';
 import { drawTrackArt } from './track-art.js';
 
-const TABS = [['growth', '成长'], ['garage', '车库'], ['shop', '商城'], ['look', '角色'], ['set', '设置']];
+const TABS = [['growth', '成长'], ['garage', '车库'], ['shop', '商城'], ['set', '设置']];
 const BOARD = [['points', '积分'], ['hits', '击飞'], ['tt', '计时'], ['rank', '段位']];
 const CUP_COLORS = ['#42a8fb', '#39cb9c', '#a27af6', '#f9ad42'];
 const SKEW = -.14;
@@ -22,21 +22,47 @@ function showHall(ui) {
   }
 }
 
+function skierAvatar(ui, { x, y, w, h }, look) {
+  const c = ui.ctx;
+  const sx = w / 44, sy = h / 44;
+  ui.panel(x, y, w, h, '#142853', 10, '#91c7f1');
+  c.save();
+  ui.rounded(x + 2, y + 2, w - 4, h - 4, 8);
+  c.clip();
+  c.translate(x, y);
+  c.scale(sx, sy);
+  c.fillStyle = gradient(c, 0, 0, 44, 44, '#99e4ff', '#3660a3');
+  c.fillRect(0, 0, 44, 44);
+  ui.panel(5, 31, 34, 19, hex(look.jacket), 10, null);
+  ui.panel(12, 13, 20, 23, hex(look.skin), 8, null);
+  ui.panel(10, 7, 24, 14, hex(look.hatColor), 8, null);
+  ui.panel(9, 17, 26, 10, '#f0f7ff', 4, null);
+  ui.panel(11, 19, 22, 6, gradient(c, 11, 25, 22, -6, '#193260', '#46c1e9'), 3, null);
+  ui.panel(19, 30, 6, 2, '#743d39', 1, null);
+  c.restore();
+}
+
 function profileBar(ui, box) {
   const g = ui.game;
   const p = g.profile;
   const info = p.levelInfo();
   const { x, y, w, h } = box;
   ui.panel(x, y, w, h, 'rgba(255,255,255,.08)', 12, null);
-  const nick = g.account.ready ? g.playerName : '存档';
-  const nickW = Math.min(100, 24 + nick.length * 13);
-  chip(ui, nick, { x: x + 12, y: y + 8, w: nickW, h: 22 }, () => g.account.openManage(), { size: 13, radius: 8 });
-  ui.text(`Lv.${info.lv}`, x + nickW + 23, y + h / 2, { bold: true, italic: true, size: 19, color: GOLD });
-  const bw = Math.max(30, w - nickW - 172);
-  meter(ui, x + nickW + 66, y + h / 2 - 4, bw, 8, info.need ? info.cur / info.need : 1,
-    gradient(ui.ctx, x, y, w, 0, '#4fd2ff', '#8dff6a'));
-  ui.text(info.need ? `${info.cur}/${info.need}` : 'MAX', x + w - 67, y + h / 2, { right: true, bold: true, size: 12, max: 52 });
-  ui.text(`❄ ${p.coins}`, x + w - 12, y + h / 2, { right: true, bold: true, size: 15, color: '#9fe4ff', max: 57 });
+  const avatar = h - 6;
+  skierAvatar(ui, { x: x + 4, y: y + 3, w: avatar, h: avatar }, g.look);
+  const nameX = x + avatar + 13;
+  const coinsX = x + w - 76;
+  ui.text(g.playerName, nameX, y + 14, { bold: true, size: 16, max: coinsX - nameX - 8 });
+  ui.text(`Lv.${info.lv}`, nameX, y + h - 12, { bold: true, italic: true, size: 15, color: GOLD, max: 47 });
+  const meterX = nameX + 51;
+  const bw = coinsX - meterX - 54;
+  meter(ui, meterX, y + h - 15, bw, 6, info.need ? info.cur / info.need : 1,
+    gradient(ui.ctx, meterX, y, bw, 0, '#4fd2ff', '#8dff6a'));
+  ui.text(info.need ? `${info.cur}/${info.need}` : 'MAX', coinsX - 7, y + h - 12,
+    { right: true, bold: true, size: 11, max: 43 });
+  ui.panel(coinsX, y + 10, 1, h - 20, 'rgba(220,232,255,.23)', 0, null);
+  ui.text(`❄ ${p.coins}`, x + w - 10, y + h / 2, { right: true, bold: true, size: 15, color: '#9fe4ff', max: 60 });
+  hit(ui, { x, y, w: coinsX - x, h }, '玩家头像', () => ui.openTab('look'));
 }
 
 // 首页顶栏：左边档案（等级/经验/雪花），右边入口；一行放不下入口就换到第二行铺满
@@ -44,18 +70,21 @@ function homeHeader(ui) {
   const { l, t, r } = ui;
   const left = l + 18;
   const right = ui.headerRight(t + 30) - 18;
-  const profileW = Math.min(340, (r - l) * .32);
+  const profileW = clamp((r - l) * .34, 262, 340);
   const room = right - left - profileW - 24;
-  const wrap = room < 320;
+  const tabGap = 6;
+  const gaps = tabGap * (TABS.length - 1);
+  const wrap = room < TABS.length * 68 + gaps;
   const h = wrap ? 105 : 61;
   card(ui, { x: l + 1, y: t + 1, w: r - l - 2, h: h - 2 }, 'rgba(11,21,48,.88)', {
     radius: 22, stroke: 'rgba(220,232,255,.24)', width: 3, shadow: 0,
   });
-  profileBar(ui, { x: left, y: t + (wrap ? 11 : 12), w: profileW, h: 38 });
-  const tabW = wrap ? r - l - 40 : Math.min(440, room);
-  const x = wrap ? l + 20 : right - tabW;
+  profileBar(ui, { x: left, y: t + 7, w: profileW, h: 46 });
+  const tabsW = wrap ? r - l - 40 : Math.min(352, room);
+  const tabW = (tabsW - gaps) / TABS.length;
+  const x = wrap ? l + 20 : right - tabsW;
   TABS.forEach(([key, label], i) => chip(ui, label, {
-    x: x + i * (tabW + 6) / 5, y: t + (wrap ? 57 : 12), w: (tabW - 24) / 5, h: 37,
+    x: x + i * (tabW + tabGap), y: t + (wrap ? 57 : 12), w: tabW, h: 37,
   }, () => ui.openTab(key), { size: 16, radius: 11 }));
   return t + h + 10;
 }

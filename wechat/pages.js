@@ -1,6 +1,6 @@
 import { WEAPONS, MODES, POINTS } from '../src/config.js';
 import { cleanNick, seasonNow, seasonLeftText, seasonReward, TASK_BONUS, TASK_BONUS_PARTS, TASK_COINS, TASK_PARTS, TASK_XP } from '../src/profile.js';
-import { fmtTime } from '../src/util.js';
+import { clamp, fmtTime } from '../src/util.js';
 import { drawHall, drawHome, drawModePicker, drawRankMenu, drawRoom, drawTrackMenu, taskResetText } from './lobby-ui.js';
 import { drawShowroom } from './showroom-ui.js';
 import { card, chip, gradient, hit, meter, pageHeader, scrim, GOLD, NAVY, PALE, ribbon } from './paint.js';
@@ -152,81 +152,109 @@ function drawSettings(ui) {
   });
 }
 
-function taskHeader(ui, box, { name, big, sub, count, colors, labels }) {
-  const { x, y, w } = box;
-  card(ui, { x, y, w, h: 124 }, colors, { radius: 20, stroke: null, stripe: .21, shadow: 0 });
-  ui.text(name, x + 18, y + 17, { size: 12, bold: true });
-  ui.text(big, x + 18, y + 44, { size: 27, bold: true, italic: true });
-  ui.text(sub, x + 18, y + 65, { size: 13, bold: true });
-  chip(ui, count, { x: x + w - 103, y: y + 13, w: 86, h: 23 }, null, { fill: '#00000035', size: 11, radius: 14 });
-  ui.panel(x + 30, y + 94, w - 64, 5, '#00000045', 3, null);
-  labels.forEach((name, i) => {
-    const w2 = String(name).length > 2 ? 53 : 33;
-    const cx = x + 30 + (w - 61) / (labels.length - 1) * i;
-    chip(ui, name, { x: cx - w2 / 2, y: y + 80, w: w2, h: 33 }, null, { fill: '#271c333f', size: 12, radius: 17 });
+function taskHeader(ui, box, { name, title, countdown, count, colors, ink, labels }) {
+  const { x, y, w, h } = box;
+  card(ui, box, colors, { radius: 16, stroke: null, stripe: .18, shadow: 0 });
+  ui.text(name, x + 15, y + 15, { size: 12, bold: true, color: ink });
+  ui.text(title, x + 15, y + 39, { size: 24, bold: true, italic: true, color: ink });
+  ui.text(countdown, x + 73, y + 40, { size: 13, bold: true, color: ink, max: w - 89 });
+  chip(ui, count, { x: x + w - 146, y: y + 7, w: 134, h: 21 }, null, { fill: '#271c335c', size: 12, radius: 13 });
+  const timelineX = x + 34;
+  const timelineW = w - 68;
+  const timelineY = y + h - 16;
+  ui.panel(timelineX, timelineY - 2, timelineW, 4, '#271c335c', 2, null);
+  labels.forEach((label, i) => {
+    const width = String(label).length > 2 ? 50 : 27;
+    const cx = timelineX + timelineW * i / (labels.length - 1);
+    chip(ui, label, { x: cx - width / 2, y: timelineY - 11, w: width, h: 22 }, null, { fill: '#271c336b', size: 12, radius: 12 });
   });
 }
 
-function taskRow(ui, box, icon, title, sub, progress, right, amount, ratio, color = '#6b41cf') {
-  const { x, y, w } = box;
-  ui.panel(x + 15, y + 21, 43, 43, color + '25', 22, color + '77');
-  ui.text(icon, x + 37, y + 42, { size: 22, center: true });
-  const max = w - 234;
-  ui.text(title, x + 71, y + 21, { size: 15, color: '#332d49', bold: true, max: max + 18 });
-  ui.text(sub, x + 71, y + 42, { size: 13, color: '#655f78', bold: true, max: max + 18 });
-  meter(ui, x + 71, y + 54, w - 249, 17, ratio, color, '#31294c');
-  ui.text(progress, x + 71 + (w - 249) / 2, y + 63, { size: 11, bold: true, center: true });
-  chip(ui, right, { x: x + w - 166, y: y + 7, w: 147, h: 30 }, null, { fill: '#eee8f9', color: '#6738c9', size: 14, radius: 17 });
-  if (amount) ui.text(amount, x + w - 21, y + 52, { size: 12, color: '#7d7194', bold: true, right: true });
-  ui.panel(x + 18, y + 86, w - 36, 1, '#e9e5f0', 0, null);
+function taskRow(ui, box, { icon, title, desc, progress, ratio = 0, prize, status, openBoard }) {
+  const { x, y, w, h } = box;
+  const top = y + (h - 64) / 2;
+  const contentX = x + 56;
+  const sideW = Math.min(128, w * .32);
+  const sideX = x + w - sideW - 12;
+  const contentW = sideX - contentX - 10;
+  ui.panel(x + 12, top + 15, 34, 34, '#ede6fb', 17, '#c6b2ef');
+  ui.text(icon, x + 29, top + 32, { size: 20, center: true });
+  ui.text(title, contentX, top + 13, { size: 16, color: '#332d49', bold: true, max: contentW });
+  ui.text(desc, contentX, top + 31, { size: 13, color: '#655f78', bold: true, max: contentW });
+  meter(ui, contentX, top + 43, contentW, 15, ratio, '#6b41cf', '#31294c');
+  ui.text(progress, contentX + contentW / 2, top + 51, { size: 12, bold: true, center: true, max: contentW - 8 });
+  if (openBoard) {
+    chip(ui, '看榜单 ›', { x: sideX + sideW - 90, y: top + 16, w: 90, h: 32 }, openBoard, {
+      fill: '#e4edff', color: '#345fb8', radius: 14, size: 13,
+    });
+  } else {
+    chip(ui, prize, { x: sideX, y: top + 9, w: sideW, h: 24 }, null, { fill: '#eee8f9', color: '#6738c9', size: 13, radius: 12 });
+    ui.text(status, sideX + sideW / 2, top + 47, { size: 12, color: '#716381', bold: true, center: true, max: sideW });
+  }
+  ui.panel(x + 12, y + h - 1, w - 24, 1, '#e9e5f0', 0, null);
 }
 
 function drawTasks(ui) {
   const p = ui.game.profile;
   const tasks = p.dailyTasks();
-  scrim(ui, 'rgba(14,20,52,.94)');
-  const y = pageHeader(ui, '任务', () => ui.page(''), { sub: '每天回来看看 · 本地时间 0 点刷新' }) + 1;
-  const w = (ui.r - ui.l - 11) / 2;
-  const day = { x: ui.l, y, w, h: ui.b - y };
-  const week = { ...day, x: day.x + w + 11 };
   const done = tasks.filter((t) => t.done).length;
   const season = seasonNow();
   const data = p.data.season?.id === season.id ? p.data.season : {};
-  ui.scrollArea('daily', day, 520, (offset) => {
-    const box = { ...day, y: day.y - offset };
-    ui.panel(box.x, box.y, w, 535, '#fbfafc', 20, null);
-    taskHeader(ui, box, { name: '每日任务', big: '今天', sub: taskResetText(), count: `已完成 ${done} / ${tasks.length}`,
-      colors: ['#ffca58', '#e18815'], labels: [1, 2, 3, '🎁'] });
-    tasks.forEach((task, i) => {
-      const item = { ...box, y: box.y + 131 + 91 * i };
-      taskRow(ui, item, TASK_ICONS[task.id], task.name, TASK_TIPS[task.id], `${Math.min(task.prog, task.goal)} / ${task.goal}`,
-        `❄ +${TASK_COINS}  ⬢ +${TASK_PARTS}`, task.done ? '✔ 已到账' : `+${TASK_XP} 经验 · 进行中`, task.prog / task.goal, '#6b41cf');
+  const dailyRows = tasks.map((task) => ({
+    icon: TASK_ICONS[task.id], title: task.name, desc: TASK_TIPS[task.id],
+    progress: `${Math.min(task.prog, task.goal)} / ${task.goal}`, ratio: task.prog / task.goal,
+    prize: `❄ +${TASK_COINS}  ⬢ +${TASK_PARTS}`, status: task.done ? '✔ 已到账' : `+${TASK_XP} 经验 · 进行中`,
+  }));
+  const weeklyRows = [
+    ['🏅', '赛季积分', '快速赛、联机赛完赛按名次计分', `${data.points || 0} 分`, 'points'],
+    ['💥', '本周击飞', '记录比赛里击飞对手的次数', `${data.hits || 0} 次`, 'hits'],
+    ['⏱', '计时赛最好成绩', '固定赛道用时 ÷ 金牌时间', data.ttTime ? fmtTime(data.ttTime) : '本周还没有成绩', 'tt'],
+  ].map(([icon, title, desc, progress, key]) => ({
+    icon, title, desc, progress,
+    openBoard: () => {
+      ui.boardKey = key;
+      ui.page('');
+      ui.refreshBoard();
+    },
+  }));
+  const columns = [
+    {
+      rows: dailyRows, name: '每日任务', title: '今天', countdown: taskResetText(), count: `已完成 ${done} / ${tasks.length}`,
+      colors: ['#ffca58', '#e18815'], ink: '#422407', labels: [...tasks.map((_, i) => i + 1), '🎁'],
+      reward: '🏅  全勤奖励', detail: `❄ +${TASK_BONUS}  ⬢ +${TASK_BONUS_PARTS}  ·  完成全部任务后发放`,
+      rewardFill: '#fff4d6', rewardStroke: '#edca73', rewardInk: '#755737',
+    },
+    {
+      rows: weeklyRows, name: `第 ${season.id} 赛季`, title: '本周', countdown: seasonLeftText(season.left),
+      count: `我的积分 ${data.points || 0}${ui.game.account.ready ? '' : ' · 离线'}`,
+      colors: ['#9870dc', '#7044c6'], ink: '#fff', labels: ['前 50', '前 10', '前 3', '👑'],
+      reward: '🏆  赛季奖励', detail: `第 1 名 ❄${seasonReward(1)}  ·  第 2–3 名 ❄${seasonReward(2)}  ·  第 4–10 名 ❄${seasonReward(4)}`,
+      rewardFill: '#eee6fc', rewardStroke: '#cdb4f8', rewardInk: '#664eb1',
+    },
+  ];
+
+  scrim(ui, 'rgba(14,20,52,.94)');
+  const y = pageHeader(ui, '任务', () => ui.page('')) + 1;
+  const width = Math.min(1080, ui.r - ui.l);
+  const area = { x: (ui.l + ui.r - width) / 2, y, w: width, h: ui.b - y };
+  const gap = 12;
+  const w = (width - gap) / 2;
+  const headerH = 86, rewardH = 58, inset = 10;
+  const rowCount = Math.max(dailyRows.length, weeklyRows.length);
+  const rowH = clamp(Math.floor((area.h - headerH - rewardH - inset * 2) / rowCount), 64, 74);
+  const contentH = headerH + rowH * rowCount + rewardH + inset * 2;
+  ui.scrollArea('tasks', area, contentH, (offset) => {
+    columns.forEach((column, i) => {
+      const x = area.x + i * (w + gap);
+      const top = area.y - offset;
+      ui.panel(x, top, w, contentH, '#fbfafc', 16, null);
+      taskHeader(ui, { x, y: top, w, h: headerH }, column);
+      column.rows.forEach((row, index) => taskRow(ui, { x, y: top + headerH + index * rowH, w, h: rowH }, row));
+      const rewardY = top + headerH + rowH * rowCount + inset;
+      ui.panel(x + 12, rewardY, w - 24, rewardH, column.rewardFill, 12, column.rewardStroke);
+      ui.text(column.reward, x + 25, rewardY + 18, { size: 16, bold: true, color: '#332d49' });
+      ui.text(column.detail, x + 25, rewardY + 39, { size: 13, bold: true, color: column.rewardInk, max: w - 50 });
     });
-    ui.panel(box.x + 16, box.y + 411, w - 32, 103, '#fff4d6', 15, '#edca73');
-    ui.text('🏅  全勤奖励', box.x + 33, box.y + 435, { size: 17, bold: true, color: '#332d49' });
-    ui.text(`❄ +${TASK_BONUS}    ⬢ +${TASK_BONUS_PARTS}    完成全部任务后发放`, box.x + 32, box.y + 471, { size: 13, bold: true, color: '#755737', max: w - 64 });
-  });
-  ui.scrollArea('weekly', week, 520, (offset) => {
-    const box = { ...week, y: week.y - offset };
-    ui.panel(box.x, box.y, w, 535, '#fbfafc', 20, null);
-    taskHeader(ui, box, { name: `第 ${season.id} 赛季`, big: '本周', sub: seasonLeftText(season.left), count: '我的积分 ' + (data.points || 0),
-      colors: ['#aa81f0', '#7044c6'], labels: ['前 50', '前 10', '前 3', '👑'] });
-    const rows = [['🏅', '赛季积分', '快速赛、联机赛完赛按名次计分', `${data.points || 0} 分`, 'points'],
-      ['💥', '本周击飞', '记录比赛里击飞对手的次数', `${data.hits || 0} 次`, 'hits'],
-      ['⏱', '计时赛最好成绩', '固定赛道的计时赛，比的是用时 ÷ 金牌时间', data.ttTime ? fmtTime(data.ttTime) : '本周还没有成绩', 'tt']];
-    rows.forEach(([icon, title, desc, label, key], i) => {
-      const item = { ...box, y: box.y + 131 + i * 91 };
-      taskRow(ui, item, icon, title, desc, label, ui.game.account.ready ? '已联网' : '离线', '', 0);
-      chip(ui, '看榜单 ›', { x: item.x + w - 98, y: item.y + 50, w: 80, h: 24 }, () => {
-        ui.boardKey = key;
-        ui.page('');
-        ui.refreshBoard();
-      }, { fill: '#e4edff', color: '#345fb8', radius: 13, size: 11 });
-    });
-    ui.panel(box.x + 16, box.y + 411, w - 32, 103, '#eee6fc', 15, '#cdb4f8');
-    ui.text('🏆  赛季奖励', box.x + 31, box.y + 435, { size: 17, color: '#332d49', bold: true });
-    ui.text(`第 1 名 ❄${seasonReward(1)}  ·  第 2–3 名 ❄${seasonReward(2)}  ·  第 4–10 名 ❄${seasonReward(4)}`,
-      box.x + 31, box.y + 472, { size: 12, color: '#664eb1', bold: true, max: w - 62 });
   });
 }
 
@@ -265,7 +293,7 @@ export function drawAccount(ui) {
   scrim(ui, 'rgba(11,21,48,.57)');
   const x = (ui.w - w) / 2, y = (ui.h - 235) / 2;
   card(ui, { x, y, w, h: 235 }, 'rgba(11,21,48,.97)', { radius: 21, stroke: '#ffffff60', shadow: 0 });
-  ui.text('存档', x + 20, y + 34, { size: 27, bold: true, italic: true, color: GOLD });
+  ui.text('个人资料', x + 20, y + 34, { size: 27, bold: true, italic: true, color: GOLD });
   chip(ui, '✕', { x: x + w - 51, y: y + 14, w: 35, h: 35 }, () => account.hide(), { active: true, radius: 18 });
   ui.text(`Lv.${g.profile.level} · ${g.playerName}`, x + 21, y + 78, { bold: true, size: 17 });
   ui.text(account.ready ? '已连接云存档' : '进度保存在本机', x + 21, y + 105, { color: PALE, size: 13 });
