@@ -3,12 +3,19 @@
 import * as THREE from 'three';
 import { Skier, lam } from './skier.js';
 import { canvasTex, glowTexture } from './props.js';
+import { makeGearPreview } from './gearThumb.js';
 
 const R = 18; // 展厅半径
 const H = 15; // 展厅高度
 export const STAGE_TOP = 0.34; // 展台台面离地高度
 // 角色默认朝向：面对镜头（镜头在 +Z 一侧），再侧过去一点
 const FACE = Math.PI - 0.62;
+// 车库里只摆装备时：侧得更多（看得到整条板），最长的一边放大到 GEAR_SIZE 米，
+// 悬在台面上方 GEAR_LIFT，往镜头这边倾 GEAR_TILT，板面上的图案看得清
+const GEAR_FACE = Math.PI - 1.05;
+const GEAR_SIZE = 4.2;
+const GEAR_LIFT = 0.8;
+const GEAR_TILT = 0.32;
 const HOLO_FONT = 'italic 900 168px "Arial Black", Impact, "Microsoft YaHei", sans-serif';
 
 const basic = (opts) => new THREE.MeshBasicMaterial({ fog: false, ...opts });
@@ -162,16 +169,42 @@ export class Showroom {
     // 脚下一团软阴影，顺着装备的方向拉长，跟着角色一起转（展厅里不用实时阴影）
     const shadow = basic({ map: glowTexture(), color: 0x040a26, transparent: true, opacity: 0.7, depthWrite: false });
     this.turn.add(flat(new THREE.PlaneGeometry(2.7, 3.9), shadow, 0.008));
+
+    // 只摆装备时的支架：往镜头倾，里面一层跟着转台转
+    this.stand = new THREE.Group();
+    this.stand.position.y = STAGE_TOP + GEAR_LIFT;
+    this.stand.rotation.x = GEAR_TILT;
+    this.spinner = new THREE.Group();
+    this.stand.add(this.spinner);
+    g.add(this.stand);
+    this.gear = null;
   }
 
-  // 换装备、换造型后重新拼一个角色
-  setLook(look) {
-    const key = JSON.stringify(look);
+  // 换装备、换造型后重新拼一个角色。gearOnly：不摆人，只把装备放大了悬在台上（车库看装备）
+  setLook(look, gearOnly = false) {
+    const key = JSON.stringify(look) + gearOnly;
     if (key === this.lookKey) return;
     this.lookKey = key;
     if (this.skier) this.skier.dispose();
-    this.skier = new Skier({ ...look });
-    this.turn.add(this.skier.group);
+    if (this.gear) this.gear.removeFromParent();
+    this.gear = null;
+    if (!gearOnly) {
+      this.skier = new Skier({ ...look });
+      this.turn.add(this.skier.group);
+      return;
+    }
+    // 从拼好的角色身上把装备摘下来；包围盒中心对准转轴，最长的一边放大到 GEAR_SIZE。
+    // 圆的（雪圈、飞碟）宽和长差不多，同样长度看着大一圈，按宽的 1.5 倍算
+    const { root, skier } = makeGearPreview(look.gear, look);
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3());
+    const c = box.getCenter(new THREE.Vector3());
+    const k = GEAR_SIZE / Math.max(size.x, size.z, Math.min(size.x, size.z) * 1.5);
+    root.scale.setScalar(k);
+    root.position.copy(c).multiplyScalar(-k);
+    this.spinner.add(root);
+    this.skier = skier;
+    this.gear = root;
   }
 
   setLabel(text) {
@@ -215,8 +248,16 @@ export class Showroom {
   update(dt) {
     this.t += dt;
     const t = this.t;
-    if (this.skier) this.skier.update(dt, { grounded: true, speed: 0, steer: Math.sin(t * 0.7) * 0.16 });
-    this.turn.rotation.y = FACE + this.yaw + Math.sin(t * 0.4) * 0.1;
+    if (this.gear) {
+      // 只摆装备：慢慢上下浮动，会转的灯圈照样转；脚下那团阴影跟着装备一起转
+      this.spinner.rotation.y = GEAR_FACE + this.yaw + Math.sin(t * 0.4) * 0.12;
+      this.stand.position.y = STAGE_TOP + GEAR_LIFT + Math.sin(t * 1.3) * 0.05;
+      for (const s of this.skier.gearFx.spin) s.rotation.y += s.userData.spin * dt;
+      this.turn.rotation.y = this.spinner.rotation.y;
+    } else {
+      if (this.skier) this.skier.update(dt, { grounded: true, speed: 0, steer: Math.sin(t * 0.7) * 0.16 });
+      this.turn.rotation.y = FACE + this.yaw + Math.sin(t * 0.4) * 0.1;
+    }
     this.holo.material.opacity = 0.8 + Math.sin(t * 2.1) * 0.06 + (Math.sin(t * 23) > 0.96 ? -0.25 : 0);
     this.ring.material.opacity = 0.7 + Math.sin(t * 1.6) * 0.25;
   }

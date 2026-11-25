@@ -602,7 +602,9 @@ export class Game {
     if (!room) return;
     if (on) {
       room.setLabel(this.showLabel);
-      room.setLook({ ...this.look, ...(this.showGear ? { gear: this.showGear } : null), ...this.showPatch });
+      // 车库里看装备：台上不摆人，只摆放大了的装备
+      const gearOnly = !!this.showGear && this.showLabel === 'GARAGE';
+      room.setLook({ ...this.look, ...(this.showGear ? { gear: this.showGear } : null), ...this.showPatch }, gearOnly);
       if (!room.group.visible) {
         // 放到起点上空很高的地方，四周的山够不着
         room.group.position.set(0, this.course.height(0, 36) + 700, 36);
@@ -2328,7 +2330,8 @@ export class Game {
     room.update(dt);
     const p = room.group.position;
     const cam = this.camera;
-    const lc = this.frameCam(dt, SHOW_W, SHOW_H, 4.5, 14);
+    // 车库只摆装备时框得比整个人小一圈，装备显得大
+    const lc = room.gear ? this.frameCam(dt, 5.2, 3.2, 4, 14) : this.frameCam(dt, SHOW_W, SHOW_H, 4.5, 14);
     const ax = p.x + lc.x;
     const ay = p.y + STAGE_TOP + 0.9 + lc.y;
     cam.position.set(ax + Math.sin(this.time * 0.3) * 0.3, ay + lc.dist * 0.13, p.z + lc.dist);
