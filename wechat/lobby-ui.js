@@ -47,46 +47,46 @@ function profileBar(ui, box) {
   const p = g.profile;
   const info = p.levelInfo();
   const { x, y, w, h } = box;
-  ui.panel(x, y, w, h, 'rgba(255,255,255,.08)', 12, null);
+  ui.panel(x, y, w, h, 'rgba(255,255,255,.08)', 11, null);
   const avatar = h - 6;
-  skierAvatar(ui, { x: x + 4, y: y + 3, w: avatar, h: avatar }, g.look);
-  const nameX = x + avatar + 13;
-  const coinsX = x + w - 76;
-  ui.text(g.playerName, nameX, y + 14, { bold: true, size: 16, max: coinsX - nameX - 8 });
-  ui.text(`Lv.${info.lv}`, nameX, y + h - 12, { bold: true, italic: true, size: 15, color: GOLD, max: 47 });
-  const meterX = nameX + 51;
-  const bw = coinsX - meterX - 54;
-  meter(ui, meterX, y + h - 15, bw, 6, info.need ? info.cur / info.need : 1,
+  skierAvatar(ui, { x: x + 3, y: y + 3, w: avatar, h: avatar }, g.look);
+  const nameX = x + avatar + 11;
+  const coinsX = x + w - 70;
+  ui.text(g.playerName, nameX, y + 12, { bold: true, size: 14, max: coinsX - nameX - 8 });
+  ui.text(`Lv.${info.lv}`, nameX, y + h - 11, { bold: true, italic: true, size: 13, color: GOLD, max: 42 });
+  const meterX = nameX + 44;
+  const bw = coinsX - meterX - 50;
+  meter(ui, meterX, y + h - 14, bw, 6, info.need ? info.cur / info.need : 1,
     gradient(ui.ctx, meterX, y, bw, 0, '#4fd2ff', '#8dff6a'));
-  ui.text(info.need ? `${info.cur}/${info.need}` : 'MAX', coinsX - 7, y + h - 12,
-    { right: true, bold: true, size: 11, max: 43 });
-  ui.panel(coinsX, y + 10, 1, h - 20, 'rgba(220,232,255,.23)', 0, null);
-  ui.text(`❄ ${p.coins}`, x + w - 10, y + h / 2, { right: true, bold: true, size: 15, color: '#9fe4ff', max: 60 });
+  ui.text(info.need ? `${info.cur}/${info.need}` : 'MAX', coinsX - 7, y + h - 11,
+    { right: true, bold: true, size: 11, max: 40 });
+  ui.panel(coinsX, y + 8, 1, h - 16, 'rgba(220,232,255,.23)', 0, null);
+  ui.text(`❄ ${p.coins}`, x + w - 9, y + h / 2, { right: true, bold: true, size: 14, color: '#9fe4ff', max: 56 });
   hit(ui, { x, y, w: coinsX - x, h }, '玩家头像', () => ui.openTab('look'));
 }
 
 // 首页顶栏：左边档案（等级/经验/雪花），右边入口；一行放不下入口就换到第二行铺满
 function homeHeader(ui) {
   const { l, t, r } = ui;
-  const left = l + 18;
-  const right = ui.headerRight(t + 30) - 18;
-  const profileW = clamp((r - l) * .34, 262, 340);
+  const left = l + 14;
+  const right = ui.headerRight(t + 26) - 14;
+  const profileW = clamp((r - l) * .3, 250, 310);
   const room = right - left - profileW - 24;
   const tabGap = 6;
   const gaps = tabGap * (TABS.length - 1);
-  const wrap = room < TABS.length * 68 + gaps;
-  const h = wrap ? 105 : 61;
+  const wrap = room < TABS.length * 62 + gaps;
+  const h = wrap ? 92 : 52;
   card(ui, { x: l + 1, y: t + 1, w: r - l - 2, h: h - 2 }, 'rgba(11,21,48,.88)', {
-    radius: 22, stroke: 'rgba(220,232,255,.24)', width: 3, shadow: 0,
+    radius: 18, stroke: 'rgba(220,232,255,.24)', width: 2, shadow: 0,
   });
-  profileBar(ui, { x: left, y: t + 7, w: profileW, h: 46 });
-  const tabsW = wrap ? r - l - 40 : Math.min(352, room);
+  profileBar(ui, { x: left, y: t + 6, w: profileW, h: 40 });
+  const tabsW = wrap ? r - l - 32 : Math.min(320, room);
   const tabW = (tabsW - gaps) / TABS.length;
-  const x = wrap ? l + 20 : right - tabsW;
+  const x = wrap ? l + 16 : right - tabsW;
   TABS.forEach(([key, label], i) => chip(ui, label, {
-    x: x + i * (tabW + tabGap), y: t + (wrap ? 57 : 12), w: tabW, h: 37,
-  }, () => ui.openTab(key), { size: 16, radius: 11 }));
-  return t + h + 10;
+    x: x + i * (tabW + tabGap), y: t + (wrap ? 50 : 9), w: tabW, h: 34,
+  }, () => ui.openTab(key), { size: 15, radius: 10 }));
+  return t + h + 8;
 }
 
 function boardEntries(ui, key) {
@@ -105,54 +105,57 @@ function drawBoard(ui, x, y, w) {
   const key = ui.boardKey || 'points';
   const season = key === 'rank' ? rankSeasonNow() : seasonNow();
   const rows = boardEntries(ui, key);
-  const listH = clamp(rows.length * 47 + 5, 52, ui.b - y - 258);
-  const h = 213 + listH;
-  card(ui, { x, y, w, h }, 'rgba(11,21,48,.93)', { radius: 22, stroke: 'rgba(255,255,255,.26)', shadow: 0 });
-  ui.rounded(x + 3, y + 3, w - 6, h - 6, 19);
+  // 榜单最多露 4 行，多的在框里滚动，不把左栏撑满
+  const ROW = 40;
+  const listH = clamp(rows.length * ROW + 4, 52, Math.min(ROW * 4 + 4, ui.b - y - 250));
+  const h = 174 + listH;
+  card(ui, { x, y, w, h }, 'rgba(11,21,48,.93)', { radius: 18, stroke: 'rgba(255,255,255,.26)', width: 2, shadow: 0 });
+  ui.rounded(x + 3, y + 3, w - 6, h - 6, 15);
   ui.ctx.save();
   ui.ctx.clip();
-  ui.ctx.fillStyle = gradient(ui.ctx, x, y, 0, 75, '#ffc15a', '#ff8a1f');
-  ui.ctx.fillRect(x, y, w, 74);
+  ui.ctx.fillStyle = gradient(ui.ctx, x, y, 0, 57, '#ffc15a', '#ff8a1f');
+  ui.ctx.fillRect(x, y, w, 56);
   ui.ctx.restore();
-  ui.text(`第 ${season.id} 赛季`, x + 17, y + 29, { color: '#3b2208', size: 22, bold: true, italic: true });
-  ui.text(seasonLeftText(season.left), x + 17, y + 53, { color: '#3b2208', size: 12, bold: true });
+  ui.text(`第 ${season.id} 赛季`, x + 15, y + 21, { color: '#3b2208', size: 19, bold: true, italic: true });
+  ui.text(seasonLeftText(season.left), x + 15, y + 41, { color: '#3b2208', size: 11, bold: true });
   const slot = (w - 20) / 4;
-  BOARD.forEach(([id, label], i) => chip(ui, label, { x: x + 10 + i * slot, y: y + 82, w: slot - 5, h: 32 }, () => {
+  BOARD.forEach(([id, label], i) => chip(ui, label, { x: x + 10 + i * slot, y: y + 63, w: slot - 5, h: 28 }, () => {
     ui.boardKey = id;
     ui.boardRules = false;
     ui.offsets.delete('board');
     ui.invalidate();
     ui.refreshBoard();
-  }, { active: key === id, radius: 18 }));
-  const list = { x: x + 10, y: y + 122, w: w - 20, h: listH + 17 };
+  }, { active: key === id, radius: 15, size: 13 }));
+  const list = { x: x + 10, y: y + 98, w: w - 20, h: listH + 6 };
   if (ui.boardRules) {
-    ui.paragraph('积分榜按名次计分。快速赛、联机赛需至少 4 人且完成比赛。击飞、计时和段位另行排名。每周结算积分榜奖励。', list.x + 4, list.y + 12, list.w - 10,
-      { size: 13, lines: 3, bold: true });
+    ui.paragraph('积分榜按名次计分。快速赛、联机赛需至少 4 人且完成比赛。击飞、计时和段位另行排名。每周结算积分榜奖励。', list.x + 4, list.y + 9, list.w - 8,
+      { size: 12, lines: 3, bold: true });
   } else {
-    ui.scrollArea('board', list, rows.length * 47, (offset) => {
+    ui.scrollArea('board', list, rows.length * ROW, (offset) => {
       if (!rows.length) ui.text('本赛季暂无成绩', list.x + 7, list.y + 12, { size: 13, color: PALE });
       rows.forEach((row, index) => {
-        const yy = list.y + index * 47 - offset;
-        if (yy + 45 < list.y || yy >= list.y + list.h) return;
+        const yy = list.y + index * ROW - offset;
+        if (yy + ROW - 2 < list.y || yy >= list.y + list.h) return;
         const style = index < 3 ? gradient(ui.ctx, list.x, yy, list.w, 0, 'rgba(255,194,70,.27)', 'rgba(255,255,255,.06)') : 'rgba(255,255,255,.06)';
-        ui.panel(list.x + 1, yy + 1, list.w - 2, 45, style, 11, row.me ? GOLD : null);
-        ui.text(index + 1, list.x + 20, yy + 23, { size: 18, color: GOLD, bold: true, italic: true, center: true });
-        ui.panel(list.x + 37, yy + 6, 34, 34, row.jacket ? hex(row.jacket) : '#ff8a1f', 18, null);
-        ui.text(row.name.slice(0, 1), list.x + 54, yy + 23, { size: 15, bold: true, center: true });
-        ui.text(row.name, list.x + 80, yy + (row.title ? 17 : 22), { size: 14, bold: true, max: list.w - 137 });
-        if (row.title) ui.text(row.title, list.x + 80, yy + 31, { size: 11, color: PALE, max: list.w - 137 });
+        ui.panel(list.x + 1, yy + 1, list.w - 2, ROW - 2, style, 10, row.me ? GOLD : null);
+        ui.text(index + 1, list.x + 17, yy + 20, { size: 16, color: GOLD, bold: true, italic: true, center: true });
+        ui.panel(list.x + 32, yy + 6, 28, 28, row.jacket ? hex(row.jacket) : '#ff8a1f', 15, null);
+        ui.text(row.name.slice(0, 1), list.x + 46, yy + 20, { size: 13, bold: true, center: true });
+        ui.text(row.name, list.x + 68, yy + (row.title ? 14 : 20), { size: 13, bold: true, max: list.w - 124 });
+        if (row.title) ui.text(row.title, list.x + 68, yy + 28, { size: 11, color: PALE, max: list.w - 124 });
         ui.text(key === 'tt' ? fmtTime(row.ttTime) : (row[key === 'rank' ? 'rankPts' : key] || 0), list.x + list.w - 8,
-          yy + 20, { size: 16, bold: true, right: true, max: 60 });
+          yy + 20, { size: 15, bold: true, right: true, max: 56 });
       });
     });
   }
+  const rewardY = list.y + list.h + 4;
   [`第1名 ❄${seasonReward(1)}`, `2–3 ❄${seasonReward(2)}`, `4–10 ❄${seasonReward(4)}`, `11–50 ❄${seasonReward(11)}`].forEach((label, i) => chip(ui, label, {
-    x: x + 10 + i * slot, y: y + h - 80, w: slot - 5, h: 21,
+    x: x + 10 + i * slot, y: rewardY, w: slot - 5, h: 20,
   }, null, { size: 10, radius: 7 }));
-  chip(ui, ui.boardRules ? '返回榜单' : '上榜规则', { x: x + 10, y: y + h - 50, w: w - 20, h: 36 }, () => {
+  chip(ui, ui.boardRules ? '返回榜单' : '上榜规则', { x: x + 10, y: rewardY + 26, w: w - 20, h: 30 }, () => {
     ui.boardRules = !ui.boardRules;
     ui.invalidate();
-  }, { size: 14 });
+  }, { size: 13 });
   return h;
 }
 
@@ -164,14 +167,16 @@ export function taskResetText() {
 }
 
 function daily(ui, box) {
-  card(ui, box, ['#fff5d7', '#ffe6aa'], { stripe: .22, radius: 18 });
+  card(ui, box, ['#fff5d7', '#ffe6aa'], { stripe: .22, radius: 15 });
   const tasks = ui.game.profile.dailyTasks();
   const { x, y, h } = box;
-  card(ui, { x: x + 24, y: y + 13, w: 49, h: 49 }, ['#77bfff', '#2f7bff'], { shadow: 3, stroke: null, radius: 11 });
-  ui.text('📋', x + 48, y + 38, { size: 28, center: true });
-  ui.text('每日任务', x + 89, y + 28, { color: '#3b2208', size: 20, bold: true, italic: true });
-  tasks.forEach((t, i) => ui.panel(x + 181 + i * 24, y + 21, 15, 15, t.done ? '#ffb52d' : '#fff', 9, '#c8984b'));
-  ui.text(tasks.every((t) => t.done) ? '今天的任务全部完成！' : taskResetText(), x + 89, y + h - 22, { size: 12, color: '#765323', bold: true });
+  const icon = h - 20;
+  card(ui, { x: x + 14, y: y + 10, w: icon, h: icon }, ['#77bfff', '#2f7bff'], { shadow: 3, stroke: null, radius: 10 });
+  ui.text('📋', x + 14 + icon / 2, y + 10 + icon / 2, { size: 21, center: true });
+  const tx = x + icon + 26;
+  ui.text('每日任务', tx, y + 20, { color: '#3b2208', size: 17, bold: true, italic: true });
+  tasks.forEach((t, i) => ui.panel(tx + 78 + i * 20, y + 13, 13, 13, t.done ? '#ffb52d' : '#fff', 8, '#c8984b'));
+  ui.text(tasks.every((t) => t.done) ? '今天的任务全部完成！' : taskResetText(), tx, y + h - 16, { size: 12, color: '#765323', bold: true });
   hit(ui, box, '每日任务', () => ui.page('tasks'));
 }
 
@@ -180,6 +185,7 @@ function raceCard(ui, box) {
   const r = g.soloRules;
   const m = MODES[r.mode];
   const { x, y, w, h } = box;
+  const k = h / 176; // 卡片按 176 高设计，矮了里面一起缩，小字保底
   card(ui, box, 'rgba(10,18,50,.94)', { skew: SKEW, radius: 16 });
   const go = { x: x + w * .41, y: y + h * .54, w: w * .57 - 5, h: h * .41 };
   const c = ui.ctx;
@@ -203,7 +209,7 @@ function raceCard(ui, box) {
   c.fillStyle = gradient(c, 0, 0, pw, 0, 'rgba(10,18,50,.9)', 'rgba(10,18,50,.2)');
   c.fillRect(0, 0, pw, ph);
   c.globalAlpha = .38;
-  ui.text(m.icon, pw * .52, 48, { size: 103, center: true, max: 122 });
+  ui.text(m.icon, pw * .52, 48 * k, { size: 103 * k, center: true, max: 122 * k });
   c.restore();
   c.lineWidth = 3;
   c.strokeStyle = 'rgba(255,255,255,.52)';
@@ -212,11 +218,14 @@ function raceCard(ui, box) {
   const track = TRACK_MAP[r.track];
   const solo = r.mode === 'tt';
   const scene = r.theme === 'random' ? '随机场景' : THEMES[r.theme].name;
-  ui.text(solo && track ? track.name : '随机赛道', x + 31, y + 22, { size: 18, bold: true, max: w * .52 });
-  chip(ui, solo ? '单人' : '8 人', { x: x + 118, y: y + 10, w: 45, h: 19 }, null, { size: 12, radius: 12 });
-  chip(ui, solo ? (track ? THEMES[track.theme].name : scene) : '随机场景', { x: x + 31, y: y + 33, w: 75, h: 20 }, null, { size: 12, radius: 12 });
-  ui.text(m.name, x + 29, y + 79, { color: GOLD, size: 34, bold: true, italic: true, max: w * .63 });
-  chip(ui, '⇄', { x: x + w - 81, y: y + 26, w: 54, h: 54 }, null, { active: true, size: 29, radius: 30 });
+  const tx = x + 20 + 11 * k;
+  ui.text(solo && track ? track.name : '随机赛道', tx, y + 22 * k, { size: Math.max(15, 18 * k), bold: true, max: w * .52 });
+  chip(ui, solo ? '单人' : '8 人', { x: tx + 87 * k, y: y + 10 * k, w: Math.max(40, 45 * k), h: Math.max(16, 19 * k) }, null,
+    { size: Math.max(11, 12 * k), radius: 12 });
+  chip(ui, solo ? (track ? THEMES[track.theme].name : scene) : '随机场景', { x: tx, y: y + 33 * k, w: Math.max(60, 75 * k), h: Math.max(17, 20 * k) },
+    null, { size: Math.max(11, 12 * k), radius: 12 });
+  ui.text(m.name, tx - 2, y + 79 * k, { color: GOLD, size: 34 * k, bold: true, italic: true, max: w * .63 });
+  chip(ui, '⇄', { x: x + w - 81 * k, y: y + 26 * k, w: 54 * k, h: 54 * k }, null, { active: true, size: 29 * k, radius: 30 * k });
   hit(ui, box, '切换玩法', () => ui.page('mode'));
   card(ui, go, ui.queue ? ['#ffb03a', '#ff5a2a'] : ['#ffe55e', '#ffb400'],
     { skew: SKEW, radius: 14, stripe: .16, stroke: '#fff3b0', shadow: 4 });
@@ -230,10 +239,12 @@ function raceCard(ui, box) {
 function midCard(ui, box, title, icon, colors, action, sub = '') {
   card(ui, box, colors, { skew: SKEW, stripe: .08 });
   const { x, y, w, h } = box;
-  chip(ui, icon, { x: x + 24, y: y + (h - 42) / 2, w: 42, h: 42 }, null, { active: true, size: 24, radius: 22 });
-  ui.text(title, x + 79, y + h * (sub ? .40 : .5), { size: 23, bold: true, italic: true, max: w - 103 });
-  if (sub) ui.text(sub, x + 80, y + h * .65, { color: GOLD, size: 12, bold: true, max: w - 103 });
-  ui.text('›', x + w - 24, y + h / 2, { size: 28, right: true, bold: true, color: '#ffffffc8' });
+  const k = h / 82;
+  const ic = 42 * k;
+  chip(ui, icon, { x: x + 24 * k, y: y + (h - ic) / 2, w: ic, h: ic }, null, { active: true, size: 24 * k, radius: ic / 2 });
+  ui.text(title, x + 79 * k, y + h * (sub ? .40 : .5), { size: Math.max(17, 23 * k), bold: true, italic: true, max: w - 103 * k });
+  if (sub) ui.text(sub, x + 80 * k, y + h * .66, { color: GOLD, size: Math.max(11, 12 * k), bold: true, max: w - 125 * k });
+  ui.text('›', x + w - 24 * k, y + h / 2, { size: 28 * k, right: true, bold: true, color: '#ffffffc8' });
   hit(ui, box, title, action);
 }
 
@@ -245,10 +256,11 @@ function homeTrack(ui, box) {
   const { x, y, w, h } = box;
   card(ui, box, ['#8658ea', '#2a1270'], { skew: SKEW, stripe: .085 });
   const cx = x + w / 2;
-  ui.text('赛道 · 场景', cx, y + 22, { center: true, color: '#d8d1ff', bold: true, size: 12 });
-  ui.text(t ? THEME_ICON[theme] : '🎲', cx, y + h * .39, { center: true, size: 40 });
-  ui.text(t ? t.name : '随机生成', cx, y + h * .65, { center: true, bold: true, italic: true, size: 18, max: w - 18 });
-  ui.text(theme === 'random' ? '随机场景' : THEMES[theme].name, cx, y + h * .77, { center: true, bold: true, size: 12 });
+  const k = h / 176;
+  ui.text('赛道 · 场景', cx, y + 22 * k, { center: true, color: '#d8d1ff', bold: true, size: Math.max(11, 12 * k) });
+  ui.text(t ? THEME_ICON[theme] : '🎲', cx, y + h * .39, { center: true, size: 40 * k });
+  ui.text(t ? t.name : '随机生成', cx, y + h * .64, { center: true, bold: true, italic: true, size: Math.max(14, 18 * k), max: w - 18 });
+  ui.text(theme === 'random' ? '随机场景' : THEMES[theme].name, cx, y + h * .77, { center: true, bold: true, size: Math.max(11, 12 * k) });
   ui.text(t ? `${(t.length / 1000).toFixed(1)} km` : LENGTHS[r.length].name, cx, y + h * .88, { center: true, color: PALE, size: 11 });
   hit(ui, box, '赛道 · 场景', () => ui.page('track'));
 }
@@ -258,22 +270,23 @@ export function drawHome(ui) {
   const p = g.profile;
   scrim(ui, gradient(ui.ctx, 0, 0, 0, ui.h, 'rgba(11,21,48,.4)', 'rgba(11,21,48,0)', 'rgba(11,21,48,.2)'));
   const y = homeHeader(ui);
-  const bw = clamp(ui.w * .24, 300, 420);
+  const bw = clamp(ui.w * .2, 252, 340);
   const boardH = drawBoard(ui, ui.l, y, bw);
-  daily(ui, { x: ui.l + 1, y: y + boardH + 12, w: bw - 2, h: 75 });
-  const h = clamp(ui.h * .25, 176, 232);
-  const x = Math.max(ui.l + bw + 17, ui.r - 986);
-  const rowW = ui.r - x - 14;
+  daily(ui, { x: ui.l + 1, y: y + boardH + 10, w: bw - 2, h: 58 });
+  const h = clamp(ui.h * .22, 136, 190);
+  // 底部一排卡片宽度跟着高度走、靠右放，屏幕宽时留出空地而不是把卡片拉长
+  const rowW = Math.min(ui.r - ui.l - bw - 31, h * 4.3);
+  const x = ui.r - 14 - rowW;
   const large = (rowW - 26) * 1.5 / 3.14;
   const mid = (rowW - 26) / 3.14;
   const track = rowW - large - mid - 26;
   const by = ui.b - h - 5;
   raceCard(ui, { x, y: by, w: large, h });
   const mx = x + large + 13;
-  const mh = (h - 12) / 2;
+  const mh = (h - 10) / 2;
   const rank = p.rankOpen() ? p.rankView().line : `Lv.${RANK_LV} 开启`;
   midCard(ui, { x: mx, y: by, w: mid, h: mh }, '排位赛', '🏅', ['#7a5cff', '#4a2fd0'], () => ui.page('rank'), rank);
-  midCard(ui, { x: mx, y: by + mh + 12, w: mid, h: mh }, '开房间', '🏠', ['#5bb487', '#2e8a62'],
+  midCard(ui, { x: mx, y: by + mh + 10, w: mid, h: mh }, '开房间', '🏠', ['#5bb487', '#2e8a62'],
     () => showHall(ui));
   homeTrack(ui, { x: mx + mid + 13, y: by, w: track, h });
   ui.frame = { x: ui.l + bw, y, w: ui.r - ui.l - bw, h: by - y };

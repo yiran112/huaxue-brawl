@@ -49,7 +49,8 @@ export class MiniUI {
       insets.capsule?.left, insets.capsule?.bottom].join(',');
     if (key === this.layoutKey) return;
     this.layoutKey = key;
-    this.scale = lobby ? Math.min(w / 1040, h / 540, 1) : 1;
+    // 大厅按 1160×600 的逻辑画布缩放：基准越大，手机上每个模块显得越小（原来 1040×540 偏大）
+    this.scale = lobby ? Math.min(w / 1160, h / 600, 1) : 1;
     this.w = w / this.scale;
     this.h = h / this.scale;
     this.l = 14 + insets.left / this.scale;
