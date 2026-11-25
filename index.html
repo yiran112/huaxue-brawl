@@ -241,14 +241,12 @@
   #menu { --side: clamp(300px, 24vw, 420px); display: grid; grid-template-columns: var(--side) minmax(0, 1fr) var(--side);
     grid-template-rows: auto minmax(0, 1fr); gap: 14px; padding: var(--edge-y) var(--edge-x) 16px;
     background: linear-gradient(180deg, rgba(11, 21, 48, .4), rgba(11, 21, 48, 0) 26%, rgba(11, 21, 48, 0) 72%, rgba(11, 21, 48, .3)); }
-  /* 首页顶上是标题、入口和档案；点开别的界面时换成 #pageTop（返回 + 标题） */
-  #menuTop { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px 18px; padding: 8px 18px; }
+  /* 首页顶上左边是档案（等级/经验/雪花），右边是入口；点开别的界面时换成 #pageTop（返回 + 标题） */
+  #menuTop { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 8px 18px; }
   #pageTop { grid-column: 1 / -1; grid-row: 1; }
-  #brand { flex: 1 1 0; min-width: 0; }
-  #title { font-size: clamp(28px, 2.5vw, 42px); font-weight: 900; font-style: italic; line-height: 1.1; color: #ffd23c; margin: 0; white-space: nowrap; }
-  #sub { margin-top: 3px; font-size: 13px; font-weight: 700; opacity: .85; white-space: nowrap; }
-  #profileWrap { flex: 1 1 0; min-width: 0; display: flex; justify-content: flex-end; }
-  #profileBar { display: flex; align-items: center; gap: 10px; width: min(100%, 340px); padding: 7px 12px; border-radius: 12px;
+  /* 档案条最宽 340px，挤不下时宁可让入口换行也不缩到比内容还窄（不设 min-width: 0，免得和入口叠在一起） */
+  #profileWrap { flex: 0 1 340px; display: flex; }
+  #profileBar { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 12px; border-radius: 12px;
     background: rgba(255, 255, 255, .08); font-size: 15px; font-weight: 900; white-space: nowrap; }
   #profileBar .lv { color: #ffd23c; font-size: 18px; font-style: italic; }
   #profileBar .ttl { padding: 1px 8px; border-radius: 8px; background: #ff3d6e; font-size: 12px; }
@@ -258,7 +256,7 @@
   .xpbar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .14); overflow: hidden; }
   .xpbar i { display: block; height: 100%; background: linear-gradient(90deg, #4fd2ff, #8dff6a); border-radius: 4px; }
   .xpbar.big { height: 12px; border-radius: 6px; }
-  .tabs { flex: none; display: flex; gap: 6px; }
+  .tabs { flex: none; display: flex; gap: 6px; margin-left: auto; }
   .tabs button { padding: 9px clamp(12px, 1.4vw, 22px); border-radius: 11px; font-size: 16px; font-weight: 900; white-space: nowrap;
     background: rgba(255, 255, 255, .1); }
   .tabs button:hover { background: #ffd23c; color: #0b1530; }
@@ -959,15 +957,12 @@
   .setbody .keys + .note, .setbody > .note:last-child { margin-bottom: 0; }
 
   /* 大厅：窗口变小时逐级收紧 */
-  @media (max-width: 1320px) { #sub { display: none; } }
-  @media (max-width: 1100px) {
-    #menuTop { flex-wrap: wrap; }
-    .tabs { order: 3; flex: 1 1 100%; }
+  @media (max-width: 760px) {
+    .tabs { flex: 1 1 100%; margin-left: 0; }
     .tabs button { flex: 1; padding: 8px 0; }
   }
   @media (max-height: 700px) {
     :root { --edge-y: 10px; --edge-x: 14px; }
-    #sub { display: none; }
     #menu { gap: 10px; padding-bottom: 12px; }
     .home { gap: 10px 12px; }
     .hico { width: 60px; height: 60px; font-size: 32px; }
@@ -1185,10 +1180,7 @@
 
 <div id="menu" class="overlay">
   <header id="menuTop" class="panel">
-    <div id="brand">
-      <h1 id="title" class="stroke">雪山大乱斗</h1>
-      <div id="sub">一边高速滑雪，一边掏出火箭筒打架 · 谁先冲到山脚谁就赢</div>
-    </div>
+    <div id="profileWrap"><div id="profileBar"></div></div>
     <nav class="tabs" id="tabs">
       <button data-tab="growth">成长</button>
       <button data-tab="garage">车库</button>
@@ -1196,7 +1188,6 @@
       <button data-tab="look">角色</button>
       <button data-tab="set">设置</button>
     </nav>
-    <div id="profileWrap"><div id="profileBar"></div></div>
   </header>
   <header id="pageTop" class="ptop hidden"></header>
   <div class="tab" id="tab-race"></div>
