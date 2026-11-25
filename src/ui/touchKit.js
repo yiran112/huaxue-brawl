@@ -137,7 +137,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 // 比赛按键的位置（CSS 像素，左上角为原点）。
 // safe：刘海、圆角让出来的边距；topRight：右上角按键最右能放到哪（数字，或者按这一排的中线高度算的函数；小游戏要让开右上角的胶囊）；
 // items / nitro：这一局有没有道具、氮气，没有就不放那个键，右手的弧收紧一格。
-// 返回 { 键名: { x, y, w, h, round, half } }，另外 speed 是速度表左下角的位置
+// 返回 { 键名: { x, y, w, h, round, half } }，另外 speed 是速度表左下角的位置，map 是小地图的框
 export function touchLayout(w, h, { safe = {}, topRight = null, items = true, nitro = true } = {}) {
   const { l = 0, r = 0, t = 0, b = 0 } = safe;
   const S = Math.round(clamp(h * 0.25, 70, 116)); // 大键：跳、转向
@@ -178,6 +178,17 @@ export function touchLayout(w, h, { safe = {}, topRight = null, items = true, ni
   out.sysBottom = top + sd;
   out.edgeR = w - Math.max(w * 0.02, r + 6);
   out.speed = { x: Math.round(ml + sw * 2 + 4 + gap * 1.8), y: Math.round(h - mb) };
+
+  // 小地图：右上角按键下面，往下一直放到右手按键的上沿。赛道又长又窄，框做成竖的
+  const mapW = Math.round(clamp(h * 0.22, 70, 104));
+  const mapX = Math.round(out.edgeR - mapW);
+  const mapY = Math.round(out.sysBottom + 10);
+  let floor = h;
+  for (const id of ['brake', 'fire', 'nitro', 'drift', 'jump']) {
+    const k = out[id];
+    if (k && k.x < mapX + mapW && k.x + k.w > mapX) floor = Math.min(floor, k.y);
+  }
+  out.map = { x: mapX, y: mapY, w: mapW, h: Math.round(clamp(floor - 10 - mapY, 60, mapW * 2)) };
   return out;
 }
 

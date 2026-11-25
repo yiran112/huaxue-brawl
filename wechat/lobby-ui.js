@@ -39,21 +39,21 @@ function profileBar(ui, box) {
   ui.text(`❄ ${p.coins}`, x + w - 12, y + h / 2, { right: true, bold: true, size: 15, color: '#9fe4ff', max: 57 });
 }
 
+// 首页顶栏：左边档案（等级/经验/雪花），右边入口；一行放不下入口就换到第二行铺满
 function homeHeader(ui) {
   const { l, t, r } = ui;
-  const wrap = ui.w <= 1100;
+  const left = l + 18;
+  const right = ui.headerRight(t + 30) - 18;
+  const profileW = Math.min(340, (r - l) * .32);
+  const room = right - left - profileW - 24;
+  const wrap = room < 320;
   const h = wrap ? 105 : 61;
   card(ui, { x: l + 1, y: t + 1, w: r - l - 2, h: h - 2 }, 'rgba(11,21,48,.88)', {
     radius: 22, stroke: 'rgba(220,232,255,.24)', width: 3, shadow: 0,
   });
-  ui.text('雪山大乱斗', l + 22, t + (wrap ? 31 : 30), { size: clamp(ui.w * .025, 28, 42), bold: true, italic: true, color: GOLD, outline: true });
-  if (!wrap && ui.w > 1320) ui.text('一边高速滑雪，一边掏出火箭筒打架 · 谁先冲到山脚谁就赢', l + 23, t + 47,
-    { size: 12, color: PALE, bold: true, max: (ui.w - 640) / 2 });
-  const profileW = Math.min(340, (r - l) * .32);
-  const right = ui.headerRight(t + 30) - 18;
-  profileBar(ui, { x: right - profileW, y: t + (wrap ? 11 : 12), w: profileW, h: 38 });
-  const tabW = wrap ? r - l - 40 : Math.min(440, r - l - profileW - 238);
-  const x = wrap ? l + 20 : (l + right - tabW - profileW) / 2 + 118;
+  profileBar(ui, { x: left, y: t + (wrap ? 11 : 12), w: profileW, h: 38 });
+  const tabW = wrap ? r - l - 40 : Math.min(440, room);
+  const x = wrap ? l + 20 : right - tabW;
   TABS.forEach(([key, label], i) => chip(ui, label, {
     x: x + i * (tabW + 6) / 5, y: t + (wrap ? 57 : 12), w: (tabW - 24) / 5, h: 37,
   }, () => ui.openTab(key), { size: 16, radius: 11 }));

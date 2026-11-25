@@ -106,7 +106,10 @@ class Socket {
   }
 
   send(data) {
-    this.task.send({ data, fail: () => this.closed() });
+    const payload = ArrayBuffer.isView(data)
+      ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+      : data;
+    this.task.send({ data: payload, fail: () => this.closed() });
   }
 
   close() {
