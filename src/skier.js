@@ -5,7 +5,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clamp, lerp, damp } from './util.js';
 import { SKINS } from './config.js';
 import { GEAR, rarityRank } from './gear.js';
-import { GEAR_MODELS, gearKit } from './gearModels.js';
+import { GEAR_MODELS, gearKit, bakeGear } from './gearModels.js';
 
 const matCache = new Map();
 export function lam(color, opts) {
@@ -272,10 +272,10 @@ export class Skier {
     this.ownGeos = [boot.geometry];
     const gear = (this.gear = GEAR_IDS.has(L.gear) ? L.gear : 'ski');
     const def = GEAR[gear];
-    // form 决定滑法和站姿。没有独立模型的装备，同一种 form 共用一套骨架，稀有度只改尺寸和装饰；
-    // 有独立模型的（def.model）由 gearModels.js 造型，坐多高、腿伸多远也跟着那台载具走
+    // form 决定滑法和站姿；每件装备的造型在 gearModels.js（def.model），坐多高、腿伸多远也跟着那台载具走。
+    // 万一哪件装备没写 model，就借同一种 form 的基础款
     const form = (this.form = def.form || 'ski');
-    const spec = (this.spec = GEAR_MODELS[def.model] || null);
+    const spec = (this.spec = GEAR_MODELS[def.model] || GEAR_MODELS[form]);
     const rank = rarityRank(def.rarity);
     const trim = def.trim ?? 0xffffff;
     // 雪橇 / 雪圈是坐着滑：整个人往下沉，腿往前伸
@@ -292,9 +292,9 @@ export class Skier {
     this.innerY = -0.75 - this.sitDrop + this.lift;
     inner.position.y = this.innerY;
     this.vehicle = null;
-    // 独立模型用到的材质，以及要动起来的零件（尾焰、灯圈、羽翼、小旗）
-    const kit = spec ? gearKit(lam, L.ski, trim, -this.lift) : null;
-    this.gearFx = kit ? kit.fx : null;
+    // 装备用到的材质，以及要动起来的零件（尾焰、灯圈、羽翼、小旗）
+    const kit = gearKit(lam, L.ski, trim, -this.lift);
+    this.gearFx = kit.fx;
 
     // 滑雪板（单板 / 雪橇 / 充气圈时只留一个空节点占位，动画代码照常转它）
     this.skis = [];
@@ -310,8 +310,10 @@ export class Skier {
       this.legs.push(leg);
       const g = new THREE.Group();
       g.position.set(sx * 0.17, 0.02, 0);
-      if (spec?.ski) spec.ski(g, kit);
-      else if (form === 'ski') this.buildSki(g, L.ski, rank, trim);
+      if (spec.ski) {
+        spec.ski(g, kit);
+        bakeGear(g, kit);
+      }
       hold.add(g);
       this.skis.push(g);
       // 靴子与腿
@@ -321,15 +323,16 @@ export class Skier {
       hold.add(limb(L.pants, sx * 0.17, 0.26, 0.04, sx * 0.18, 0.5, -0.14, 0.105));
       hold.add(limb(L.pants, sx * 0.18, 0.5, -0.14, sx * 0.13, 0.72, 0.1, 0.12));
     }
-    if (spec?.build) {
+    if (spec.build) {
       // inner 下沉了多少，载具就抬回多少：坐着滑的载具按雪面坐标造型，单板按脚底坐标
       const v = (this.vehicle = new THREE.Group());
       v.position.y = this.sitDrop;
       spec.build(v, kit);
       inner.add(v);
-    } else if (!spec) {
-      this.buildVehicle(form, L, rank, trim);
+      bakeGear(v, kit);
     }
+    // 合并出来的几何体是这个角色独有的，销毁时一起释放
+    this.ownGeos.push(...kit.own);
 
     // 躯干
     this.torso = new THREE.Group();
@@ -455,86 +458,6 @@ export class Skier {
     this.ice.visible = false;
     this.iceT = 0;
     this.group.add(this.ice);
-  }
-
-  // 双板挂在两只脚上。rank 0 是原来的入门双板；更高稀有度更长，并加上装饰条
-  buildSki(g, color, rank, trim) {
-    const len = 1.7 + rank * 0.16;
-    const z = -0.08 - rank * 0.05;
-    g.add(mesh('box', color, 0.115, 0.035, len, 0, 0, z));
-    const tip = mesh('box', color, 0.115, 0.035, 0.26, 0, 0.045, z - len / 2 - 0.1);
-    tip.rotation.x = 0.45;
-    g.add(tip);
-    g.add(mesh('box', 0x20222a, 0.12, 0.05, 0.3, 0, 0.03, 0.02));
-    if (rank >= 1) g.add(mesh('box', trim, 0.03, 0.04, len * 0.72, 0, 0.02, z));
-    if (rank >= 2) {
-      for (const sx of [-1, 1]) g.add(mesh('box', trim, 0.018, 0.02, len * 0.88, sx * 0.055, 0.012, z));
-    }
-    if (rank >= 3) g.add(mesh('box', trim, 0.07, 0.028, 0.2, 0, 0.05, z - len / 2 + 0.02, { emissive: trim }));
-  }
-
-  // 单板 / 雪橇 / 雪圈。挂在 inner 上，跟着人一起压弯；inner 下沉了多少，这里就抬回多少，正好贴地。
-  // B 级（单板、雪橇、充气圈）保持原来的尺寸，其它稀有度在这套骨架上放大或缩小。
-  buildVehicle(form, L, rank, trim) {
-    if (form === 'ski') return;
-    const v = (this.vehicle = new THREE.Group());
-    const y0 = this.sitDrop;
-    const glow = rank >= 3 ? { emissive: trim } : undefined;
-    if (form === 'board') {
-      const d = rank - 1;
-      const w = 0.5 + d * 0.05;
-      const len = 1.5 + d * 0.14;
-      v.add(mesh('box', L.ski, w, 0.04, len, 0, y0 + 0.02, -0.05));
-      for (const s of [-1, 1]) {
-        const end = mesh('box', L.ski, w, 0.04, 0.22, 0, y0 + 0.06, -0.05 + s * (len / 2 + 0.08));
-        end.rotation.x = -s * 0.4;
-        v.add(end);
-      }
-      v.add(mesh('box', trim, 0.12 + Math.max(0, d) * 0.02, 0.045, len * 0.8, 0, y0 + 0.025, -0.05, glow));
-      for (const sx of [-1, 1]) v.add(mesh('box', 0x20222a, 0.16, 0.08, 0.24, sx * 0.17, y0 + 0.07, 0.02));
-      if (rank >= 2) {
-        for (const sx of [-1, 1]) v.add(mesh('box', trim, 0.028, 0.02, len * 0.82, sx * (w / 2 - 0.01), y0 + 0.03, -0.05));
-      }
-    } else if (form === 'sled') {
-      const d = rank - 1;
-      const w = 0.7 + d * 0.04;
-      const len = 1.55 + d * 0.14;
-      const rail = rank === 0 ? trim : rank >= 2 ? trim : 0x9aa0ac;
-      v.add(mesh('box', L.ski, w, 0.1, len, 0, y0 + 0.24, -0.3));
-      v.add(mesh('box', rank >= 2 ? trim : 0xffffff, w + 0.02, 0.03, 0.12, 0, y0 + 0.3, -0.3, glow));
-      const curl = mesh('box', L.ski, w, 0.1, 0.4, 0, y0 + 0.4, -0.3 - len / 2 - 0.095);
-      curl.rotation.x = 0.9;
-      v.add(curl);
-      for (const sx of [-1, 1]) {
-        v.add(mesh('box', rail, 0.05, 0.05, len + 0.25, sx * 0.3, y0 + 0.03, -0.35));
-        const tip = mesh('box', rail, 0.05, 0.05, 0.3, sx * 0.3, y0 + 0.12, -0.35 - (len + 0.25) / 2 - 0.05);
-        tip.rotation.x = 0.8;
-        v.add(tip);
-        for (const z of [0.2, -0.4, -0.95]) v.add(mesh('box', 0x6f7883, 0.04, 0.2, 0.04, sx * 0.3, y0 + 0.13, z));
-      }
-      v.add(limb(0xffd23c, -0.3, y0 + 0.45, -1.25, 0.3, y0 + 0.45, -1.25, 0.02));
-      if (rank >= 3) v.add(mesh('box', trim, 0.22, 0.08, 0.22, 0, y0 + 0.38, 0.2, glow));
-    } else {
-      const d = rank - 1;
-      const rad = 0.6 + d * 0.07;
-      const thick = 0.27 + d * 0.035;
-      const torus = new THREE.Mesh(new THREE.TorusGeometry(rad, thick, 10, 22), lam(L.ski));
-      torus.rotation.x = Math.PI / 2;
-      torus.position.set(0, y0 + 0.27, -0.05);
-      torus.castShadow = true;
-      this.ownGeos.push(torus.geometry);
-      v.add(torus);
-      if (rank >= 2) {
-        const inner = new THREE.Mesh(new THREE.TorusGeometry(rad * 0.62, 0.045, 8, 18), lam(trim, glow));
-        inner.rotation.x = Math.PI / 2;
-        inner.position.copy(torus.position);
-        this.ownGeos.push(inner.geometry);
-        v.add(inner);
-      }
-      v.add(mesh('cyl', 0x2b2f3a, 0.36, 0.06, 0.36, 0, y0 + 0.12, -0.05));
-      for (const sx of [-1, 1]) v.add(mesh('box', rank >= 2 ? trim : 0x20222a, 0.07, 0.1, 0.22, sx * (0.72 + (rank - 1) * 0.08), y0 + 0.42, -0.05, glow));
-    }
-    this.inner.add(v);
   }
 
   buildBack(kind, L) {

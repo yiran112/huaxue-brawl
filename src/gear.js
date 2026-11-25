@@ -16,37 +16,37 @@ export const RARITY_KEYS = ['C', 'B', 'A', 'S'];
 export const rarityRank = (r) => (RARITY[r] ? RARITY[r].order : 0);
 
 // form：滑法和站姿（ski 双板 / board 单板 / sled 坐着的雪橇 / tube 坐着的雪圈）
-// model：有这个字段的装备用 gearModels.js 里的独立精细模型；没有的用 form 的通用模型，按稀有度放大、加装饰
+// model：用 gearModels.js 里的哪一套模型（每件装备一套独立造型）
 // trim：装饰色。unlock：{ lv } 到等级自动解锁；{ cost } 花雪花币购买；{ lv, cost } 到等级后才能购买；
 // { cost, shop: true } 只在商城里卖，不看等级
 export const GEAR = {
-  ski: { name: '双板', icon: '🎿', rarity: 'C', form: 'ski', desc: '各项均衡，上手最容易', stats: { speed: 3, accel: 3, turn: 3, air: 3, tough: 3 } },
-  learner: { name: '练习单板', icon: '❄️', rarity: 'C', form: 'board', trim: 0xd7e4ff, desc: '入门单板，转向和空中略好；极速低、怕撞', stats: { speed: 2.2, accel: 2.6, turn: 3.2, air: 3.8, tough: 2.2 }, powder: 0.75, unlock: { lv: 2 } },
-  wood: { name: '木雪橇', icon: '🌲', rarity: 'C', form: 'sled', trim: 0xc48a3a, desc: '直道还能跑，转向笨、几乎翻不了跟头，深雪里更慢', stats: { speed: 3.8, accel: 2.2, turn: 1.8, air: 1.4, tough: 3.4 }, powder: 1.45, unlock: { lv: 4, cost: 600 } },
-  cushion: { name: '雪垫', icon: '🟦', rarity: 'C', form: 'tube', trim: 0x7ec8ff, desc: '起步和抗撞不错，深雪里不太减速；极速一般、空中很笨', stats: { speed: 2.4, accel: 3.8, turn: 2.2, air: 1.4, tough: 4 }, powder: 0.55, unlock: { lv: 5, cost: 800 } },
+  ski: { name: '双板', icon: '🎿', rarity: 'C', form: 'ski', model: 'ski', trim: 0xff5a3c, desc: '各项均衡，上手最容易', stats: { speed: 3, accel: 3, turn: 3, air: 3, tough: 3 } },
+  learner: { name: '练习单板', icon: '❄️', rarity: 'C', form: 'board', model: 'learner', trim: 0xd7e4ff, desc: '入门单板，转向和空中略好；极速低、怕撞', stats: { speed: 2.2, accel: 2.6, turn: 3.2, air: 3.8, tough: 2.2 }, powder: 0.75, unlock: { lv: 2 } },
+  wood: { name: '木雪橇', icon: '🌲', rarity: 'C', form: 'sled', model: 'wood', trim: 0xc48a3a, desc: '直道还能跑，转向笨、几乎翻不了跟头，深雪里更慢', stats: { speed: 3.8, accel: 2.2, turn: 1.8, air: 1.4, tough: 3.4 }, powder: 1.45, unlock: { lv: 4, cost: 600 } },
+  cushion: { name: '雪垫', icon: '🟦', rarity: 'C', form: 'tube', model: 'cushion', trim: 0x7ec8ff, desc: '起步和抗撞不错，深雪里不太减速；极速一般、空中很笨', stats: { speed: 2.4, accel: 3.8, turn: 2.2, air: 1.4, tough: 4 }, powder: 0.55, unlock: { lv: 5, cost: 800 } },
 
-  race: { name: '竞赛双板', icon: '⛷️', rarity: 'B', form: 'ski', trim: 0xffd23c, desc: '比入门双板更快、转向更灵，空中稍弱', stats: { speed: 4, accel: 3.2, turn: 3.4, air: 2.6, tough: 3.2 }, powder: 0.95, unlock: { lv: 5, cost: 1200 } },
-  board: { name: '单板', icon: '🏂', rarity: 'B', form: 'board', trim: 0xffffff, desc: '漂移蓄力快、空中翻得快，深雪里减速少；极速略低、怕撞', stats: { speed: 2.6, accel: 3, turn: 3.6, air: 4.6, tough: 2.4 }, powder: 0.6, unlock: { lv: 3 } },
-  sled: { name: '雪橇', icon: '🛷', rarity: 'B', form: 'sled', trim: 0xffffff, desc: '极速高、抗撞；转向笨重、很难翻跟头，陷进深雪更慢', stats: { speed: 4.6, accel: 2.4, turn: 2.2, air: 1.8, tough: 4 }, powder: 1.3, unlock: { lv: 6, cost: 1500 } },
-  tube: { name: '充气圈', icon: '🍩', rarity: 'B', form: 'tube', trim: 0xffffff, desc: '起步快、几乎撞不翻、深雪里照样飘；极速一般', stats: { speed: 3, accel: 4.6, turn: 2.6, air: 1.6, tough: 5 }, powder: 0.45, unlock: { lv: 9, cost: 2500 } },
+  race: { name: '竞赛双板', icon: '⛷️', rarity: 'B', form: 'ski', model: 'race', trim: 0xffd23c, desc: '比入门双板更快、转向更灵，空中稍弱', stats: { speed: 4, accel: 3.2, turn: 3.4, air: 2.6, tough: 3.2 }, powder: 0.95, unlock: { lv: 5, cost: 1200 } },
+  board: { name: '单板', icon: '🏂', rarity: 'B', form: 'board', model: 'board', trim: 0x3d7bff, desc: '漂移蓄力快、空中翻得快，深雪里减速少；极速略低、怕撞', stats: { speed: 2.6, accel: 3, turn: 3.6, air: 4.6, tough: 2.4 }, powder: 0.6, unlock: { lv: 3 } },
+  sled: { name: '雪橇', icon: '🛷', rarity: 'B', form: 'sled', model: 'sled', trim: 0xff3d4f, desc: '极速高、抗撞；转向笨重、很难翻跟头，陷进深雪更慢', stats: { speed: 4.6, accel: 2.4, turn: 2.2, air: 1.8, tough: 4 }, powder: 1.3, unlock: { lv: 6, cost: 1500 } },
+  tube: { name: '充气圈', icon: '🍩', rarity: 'B', form: 'tube', model: 'tube', trim: 0xffb020, desc: '起步快、几乎撞不翻、深雪里照样飘；极速一般', stats: { speed: 3, accel: 4.6, turn: 2.6, air: 1.6, tough: 5 }, powder: 0.45, unlock: { lv: 9, cost: 2500 } },
   blades: { name: '雪刃短板', icon: '🗡️', rarity: 'B', form: 'ski', model: 'blades', trim: 0x3ddc97, desc: '不用雪杖的短板：转向灵、空中好翻；极速低、怕撞，深雪里容易陷', stats: { speed: 2.8, accel: 3.4, turn: 4.2, air: 3.8, tough: 2.4 }, powder: 1.15, unlock: { lv: 4, cost: 1000 } },
   fish: { name: '鱼尾粉雪板', icon: '🐟', rarity: 'B', form: 'board', model: 'fish', trim: 0xff8a1f, desc: '宽板头加燕尾，深雪里几乎不减速；各项平均，没有特别突出的', stats: { speed: 3.4, accel: 3.2, turn: 3.2, air: 3.4, tough: 2.8 }, powder: 0.4, unlock: { lv: 7, cost: 1600 } },
   toboggan: { name: '托博根长橇', icon: '🏔️', rarity: 'B', form: 'sled', model: 'toboggan', trim: 0xd9a05b, desc: '卷头木板长橇：抗撞、起步不慢，深雪里不怎么陷；转向和空中都笨', stats: { speed: 4, accel: 3.2, turn: 2, air: 1.6, tough: 4.6 }, powder: 0.85, unlock: { lv: 8, cost: 1800 } },
   saucer: { name: '雪地飞碟', icon: '🥏', rarity: 'B', form: 'tube', model: 'saucer', trim: 0xff5fc8, desc: '一只滑雪碟：起步快、转得动，比充气圈快；没那么抗撞', stats: { speed: 3.4, accel: 4, turn: 3.6, air: 2.6, tough: 3.2 }, powder: 0.7, unlock: { lv: 10, cost: 2200 } },
 
-  carbon: { name: '碳纤维双板', icon: '⚡', rarity: 'A', form: 'ski', trim: 0x3fc8ff, desc: '竞速板：极速和转向都高，空中只是中等，深雪略好滑', stats: { speed: 4.8, accel: 3.6, turn: 4, air: 3, tough: 3.8 }, powder: 0.9, unlock: { lv: 10, cost: 3200 } },
-  park: { name: '公园单板', icon: '🌙', rarity: 'A', form: 'board', trim: 0xff5fc8, desc: '漂移和空翻很强，深雪减速少；仍然怕撞', stats: { speed: 3.2, accel: 3.6, turn: 4.6, air: 5.6, tough: 2.8 }, powder: 0.48, unlock: { cost: 3600, shop: true } },
-  steel: { name: '钢刃雪橇', icon: '🎯', rarity: 'A', form: 'sled', trim: 0xd8dee8, desc: '极速和抗撞更高，转向仍然迟钝，深雪比普通雪橇好一点', stats: { speed: 5.4, accel: 2.8, turn: 2.6, air: 2.2, tough: 5 }, powder: 1.15, unlock: { cost: 4000, shop: true } },
-  ring: { name: '竞速雪圈', icon: '⭕', rarity: 'A', form: 'tube', trim: 0xff8a1f, desc: '起步很猛、很难被撞翻，深雪里照样飘；不适合空翻', stats: { speed: 3.6, accel: 5.4, turn: 3.2, air: 2, tough: 5.8 }, powder: 0.35, unlock: { cost: 4400, shop: true } },
+  carbon: { name: '碳纤维双板', icon: '⚡', rarity: 'A', form: 'ski', model: 'carbon', trim: 0x3fc8ff, desc: '竞速板：极速和转向都高，空中只是中等，深雪略好滑', stats: { speed: 4.8, accel: 3.6, turn: 4, air: 3, tough: 3.8 }, powder: 0.9, unlock: { lv: 10, cost: 3200 } },
+  park: { name: '公园单板', icon: '🌙', rarity: 'A', form: 'board', model: 'park', trim: 0xff5fc8, desc: '漂移和空翻很强，深雪减速少；仍然怕撞', stats: { speed: 3.2, accel: 3.6, turn: 4.6, air: 5.6, tough: 2.8 }, powder: 0.48, unlock: { cost: 3600, shop: true } },
+  steel: { name: '钢刃雪橇', icon: '🎯', rarity: 'A', form: 'sled', model: 'steel', trim: 0xd8dee8, desc: '极速和抗撞更高，转向仍然迟钝，深雪比普通雪橇好一点', stats: { speed: 5.4, accel: 2.8, turn: 2.6, air: 2.2, tough: 5 }, powder: 1.15, unlock: { cost: 4000, shop: true } },
+  ring: { name: '竞速雪圈', icon: '⭕', rarity: 'A', form: 'tube', model: 'ring', trim: 0xff8a1f, desc: '起步很猛、很难被撞翻，深雪里照样飘；不适合空翻', stats: { speed: 3.6, accel: 5.4, turn: 3.2, air: 2, tough: 5.8 }, powder: 0.35, unlock: { cost: 4400, shop: true } },
   twin: { name: '自由式双翘板', icon: '🌀', rarity: 'A', form: 'ski', model: 'twin', trim: 0xff5fc8, desc: '头尾都翘的公园双板：转向和空中很强；极速不如竞速板、怕撞', stats: { speed: 3.8, accel: 3.8, turn: 4.4, air: 4.8, tough: 3 }, powder: 1, unlock: { cost: 3400, shop: true } },
   hover: { name: '悬浮滑板', icon: '🛹', rarity: 'A', form: 'board', model: 'hover', trim: 0x3fe0ff, desc: '离地悬浮：极速、起步、转向、空中都不错，深雪几乎不减速；很怕撞', stats: { speed: 4.4, accel: 4, turn: 4, air: 4.2, tough: 2.6 }, powder: 0.3, unlock: { cost: 3800, shop: true } },
   bike: { name: '雪地单车', icon: '🚲', rarity: 'A', form: 'sled', model: 'bike', trim: 0xffd23c, desc: '坐着滑里最会拐弯的：极速高、转向灵；起步和抗撞一般，深雪里吃力', stats: { speed: 4.8, accel: 3.6, turn: 4, air: 3, tough: 3.4 }, powder: 1.2, unlock: { cost: 4200, shop: true } },
   raft: { name: '雪地冲锋艇', icon: '🚤', rarity: 'A', form: 'tube', model: 'raft', trim: 0xff6a1f, desc: '带滑橇的充气艇：极难撞翻、起步猛、深雪照飘；转向笨、别想空翻', stats: { speed: 4.2, accel: 4.4, turn: 2.8, air: 1.8, tough: 6 }, powder: 0.4, unlock: { cost: 4600, shop: true } },
 
-  aurora: { name: '极光双板', icon: '👑', rarity: 'S', form: 'ski', trim: 0xb388ff, desc: '传说双板，五项都强，深雪也滑得开', stats: { speed: 5.6, accel: 4.2, turn: 4.6, air: 3.6, tough: 4.4 }, powder: 0.8, unlock: { cost: 7000, shop: true } },
-  storm: { name: '风暴单板', icon: '🔥', rarity: 'S', form: 'board', trim: 0xff6a1f, desc: '转向和空中拉满，深雪几乎不减速；抗撞仍是短板', stats: { speed: 3.8, accel: 4.2, turn: 5.4, air: 6.4, tough: 3.2 }, powder: 0.38, unlock: { cost: 7600, shop: true } },
-  dragon: { name: '龙骨雪橇', icon: '💎', rarity: 'S', form: 'sled', trim: 0xff4d3a, desc: '极速和抗撞接近上限，转向仍偏笨，不再特别怕深雪', stats: { speed: 6.4, accel: 3.4, turn: 3.2, air: 2.6, tough: 5.8 }, powder: 1, unlock: { cost: 8200, shop: true } },
-  titan: { name: '泰坦雪圈', icon: '⭐', rarity: 'S', form: 'tube', trim: 0xffd23c, desc: '起步和抗撞封顶，深雪里几乎不减速；空中依然笨重', stats: { speed: 4.2, accel: 6.4, turn: 3.6, air: 2.4, tough: 6.4 }, powder: 0.28, unlock: { cost: 9000, shop: true } },
+  aurora: { name: '极光双板', icon: '👑', rarity: 'S', form: 'ski', model: 'aurora', trim: 0xb388ff, desc: '传说双板，五项都强，深雪也滑得开', stats: { speed: 5.6, accel: 4.2, turn: 4.6, air: 3.6, tough: 4.4 }, powder: 0.8, unlock: { cost: 7000, shop: true } },
+  storm: { name: '风暴单板', icon: '🔥', rarity: 'S', form: 'board', model: 'storm', trim: 0xff6a1f, desc: '转向和空中拉满，深雪几乎不减速；抗撞仍是短板', stats: { speed: 3.8, accel: 4.2, turn: 5.4, air: 6.4, tough: 3.2 }, powder: 0.38, unlock: { cost: 7600, shop: true } },
+  dragon: { name: '龙骨雪橇', icon: '💎', rarity: 'S', form: 'sled', model: 'dragon', trim: 0xff4d3a, desc: '极速和抗撞接近上限，转向仍偏笨，不再特别怕深雪', stats: { speed: 6.4, accel: 3.4, turn: 3.2, air: 2.6, tough: 5.8 }, powder: 1, unlock: { cost: 8200, shop: true } },
+  titan: { name: '泰坦雪圈', icon: '⭐', rarity: 'S', form: 'tube', model: 'titan', trim: 0xffd23c, desc: '起步和抗撞封顶，深雪里几乎不减速；空中依然笨重', stats: { speed: 4.2, accel: 6.4, turn: 3.6, air: 2.4, tough: 6.4 }, powder: 0.28, unlock: { cost: 9000, shop: true } },
   mech: { name: '机甲双板', icon: '🤖', rarity: 'S', form: 'ski', model: 'mech', trim: 0x3fe0ff, desc: '装甲板身带推进器：极速和起步都猛，五项没有短板', stats: { speed: 5, accel: 5, turn: 4.2, air: 4.4, tough: 4.2 }, powder: 0.85, unlock: { cost: 7200, shop: true } },
   phoenix: { name: '凤凰翼板', icon: '🦅', rarity: 'S', form: 'board', model: 'phoenix', trim: 0xffc21f, desc: '带羽翼的单板：空中接近上限、转向极灵，比风暴单板快；还是怕撞', stats: { speed: 4.6, accel: 4, turn: 5, air: 6.2, tough: 3 }, powder: 0.35, unlock: { cost: 7800, shop: true } },
   mobile: { name: '雪怪摩托', icon: '🏍️', rarity: 'S', form: 'sled', model: 'mobile', trim: 0xff4d3a, desc: '履带雪地摩托：极速、起步、抗撞都高，转向也跟得上；空中笨重', stats: { speed: 5.6, accel: 5.2, turn: 3.8, air: 2.6, tough: 5.2 }, powder: 0.9, unlock: { cost: 8600, shop: true } },

@@ -1,298 +1,502 @@
-// 新滑行装备的精细模型。每件一套独立造型：放样出带翘头和腰线的板面、弯管、旋转体，
-// 再加上固定器、悬挂、车灯这些细节。这里只管拼几何体；动画（喷火、转灯、扇翼、悬浮起伏）由 skier.js 驱动。
-// 约定：-Z 是前方，+Y 朝上。坐着滑的载具用地面坐标（y = 0 是雪面）；
-// 单板用脚底坐标（板面顶在 y = 0.04）；双板用单只脚的坐标（板面中心在 y = 0）。
+// 滑行装备的精细模型。每件一套独立造型：放样出带翘头和腰线的板面，再加固定器、推进器、灯条这些零件，
+// 板面上盖一层程序画的图案（文字、贴纸、花纹，见 gearDecals.js）。
+// 这里只管拼几何体；动画（喷火、转灯、扇翼、悬浮起伏）由 skier.js 驱动。
+// 约定：-Z 是前方，+Y 朝上。双板用单只脚的坐标（板面中心在 y = 0）；单板用脚底坐标（板面顶在 y = 0.04）；
+// 坐着滑的载具在 gearRides.js，用地面坐标（y = 0 是雪面）。
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import {
+  PRIM, geo, put, box, ball, soft, strut, rod, plateGeo, studsGeo, loftGeo, skiStations, inlay, under, railOf, sample, sampleEnds,
+  skin, flame, glowMat, shade,
+} from './gearParts.js';
+import {
+  INK, WHITE, HAZARD, rect, poly, line, circle, ring, round, text, star, heart, chevrons, hazard, warn, barcode, snowflake, bolt, scales,
+  weave, hexes, dotRow, css, rng,
+} from './gearDecals.js';
+import { RIDES } from './gearRides.js';
 
-const DARK = 0x20222a;
-const STEEL = 0x9aa0ac;
-const RUBBER = 0x15171c;
-const HULL = 0x2b2f3a;
-const CORD = 0xe8dcc0;
+export { gearKit, bakeGear } from './gearParts.js';
 
-// 几何体只和造型有关、和颜色无关：每种零件全局只建一份，所有角色共用
-const geos = new Map();
-function geo(key, make) {
-  let g = geos.get(key);
-  if (!g) geos.set(key, (g = make()));
-  return g;
-}
-
-const PRIM = {
-  box: new THREE.BoxGeometry(1, 1, 1),
-  cyl: new THREE.CylinderGeometry(1, 1, 1, 16),
-  sphere: new THREE.SphereGeometry(1, 20, 14),
-  cone: new THREE.ConeGeometry(1, 1, 14),
-};
-
-// 发光的光晕和尾焰不受光照，材质全局共用
-const glowMats = new Map();
-function glowMat(color, opacity) {
-  const key = color + ':' + opacity;
-  let m = glowMats.get(key);
-  if (!m) {
-    m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-    glowMats.set(key, m);
-  }
-  return m;
-}
-const flameMat = new THREE.MeshBasicMaterial({ color: 0xffa020, transparent: true, opacity: 0.85, depthWrite: false });
-
-const UP = new THREE.Vector3(0, 1, 0);
-const _a = new THREE.Vector3();
-const _b = new THREE.Vector3();
-
-function put(parent, geometry, material, x = 0, y = 0, z = 0, sx = 1, sy = sx, sz = sx) {
-  const m = new THREE.Mesh(geometry, material);
-  m.position.set(x, y, z);
-  m.scale.set(sx, sy, sz);
-  m.castShadow = true;
-  parent.add(m);
-  return m;
-}
-const box = (p, mat, w, h, d, x, y, z) => put(p, PRIM.box, mat, x, y, z, w, h, d);
-const ball = (p, mat, rx, ry, rz, x, y, z) => put(p, PRIM.sphere, mat, x, y, z, rx, ry, rz);
-// 不投影子的小零件（光晕、玻璃）
-const soft = (m) => {
-  m.castShadow = false;
-  return m;
-};
-
-// 两点之间的一根圆杆
-function strut(p, mat, a, b, r) {
-  _a.set(a[0], a[1], a[2]);
-  _b.set(b[0], b[1], b[2]);
-  const m = put(p, PRIM.cyl, mat);
-  m.scale.set(r, _a.distanceTo(_b), r);
-  m.position.copy(_a).add(_b).multiplyScalar(0.5);
-  m.quaternion.setFromUnitVectors(UP, _b.sub(_a).normalize());
-  return m;
-}
-// 顺着前后方向的圆筒
-const rod = (p, mat, r, len, x, y, z) => strut(p, mat, [x, y, z - len / 2], [x, y, z + len / 2], r);
-
-// 穿过一串点的弯管
-function pipeGeo(pts, r, seg = 32, sides = 8) {
-  const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])));
-  return new THREE.TubeGeometry(curve, seg, r, sides, false);
-}
-// 左半边的点（最后一个在中线上）补成左右对称的一整条
-const mirrorX = (pts) => pts.concat(pts.slice(0, -1).reverse().map(([x, y, z]) => [-x, y, z]));
-
-// 旋转体。轮廓 [半径, 高度] 要从底部中心往外、再绕到顶上回来，面才朝外
-const lathe = (pts, seg = 36) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg);
-
-// 一块有厚度的平板。upright：侧面轮廓（X 朝前、Y 朝上）立着放；否则是俯视轮廓（X 朝右、Y 朝前）平着放
-function plateGeo(pts, depth, upright) {
-  const g = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y))), { depth, bevelEnabled: false });
-  g.translate(0, 0, -depth / 2);
-  return upright ? g.rotateY(Math.PI / 2) : g.rotateX(-Math.PI / 2);
-}
-
-// 把一个小零件绕一圈复制 count 份，合成一个几何体
-function ringOf(base, count, radius, phase = 0) {
-  const parts = [];
-  for (let i = 0; i < count; i++) {
-    const a = phase + (i / count) * Math.PI * 2;
-    parts.push(base.clone().translate(Math.sin(a) * radius, 0, Math.cos(a) * radius));
-  }
-  return mergeGeometries(parts);
-}
-
-// 放样：沿侧面轮廓线摆一串截面，连成一块板。
-// 截面：{ z, y 中心线位置, w 宽, th 厚, x 左右偏移, off 沿板面法线抬高多少 }。
-// 厚度方向跟着轮廓线的法线走，所以能做出翘头和卷起来的橇头。顶、底、两侧各用一套顶点，棱是硬的。
-function loftGeo(list) {
-  const st = list[0].z < list[list.length - 1].z ? list.slice().reverse() : list;
-  const n = st.length;
-  const ring = [];
-  for (let i = 0; i < n; i++) {
-    const s = st[i];
-    const p = st[Math.max(0, i - 1)];
-    const q = st[Math.min(n - 1, i + 1)];
-    let tz = q.z - p.z;
-    let ty = q.y - p.y;
-    const len = Math.hypot(tz, ty) || 1;
-    tz /= len;
-    ty /= len;
-    const ny = -tz;
-    const nz = ty;
-    const off = s.off || 0;
-    const x = s.x || 0;
-    const y = s.y + ny * off;
-    const z = s.z + nz * off;
-    const hw = s.w / 2;
-    const ht = s.th / 2;
-    // 左上、右上、右下、左下
-    ring.push([
-      [x - hw, y + ny * ht, z + nz * ht],
-      [x + hw, y + ny * ht, z + nz * ht],
-      [x + hw, y - ny * ht, z - nz * ht],
-      [x - hw, y - ny * ht, z - nz * ht],
-    ]);
-  }
-  const pos = [];
-  const idx = [];
-  for (let k = 0; k < 4; k++) {
-    const base = pos.length / 3;
-    for (let i = 0; i < n; i++) pos.push(...ring[i][k], ...ring[i][(k + 1) % 4]);
-    for (let i = 0; i < n - 1; i++) {
-      const a0 = base + i * 2;
-      idx.push(a0, a0 + 1, a0 + 2, a0 + 1, a0 + 3, a0 + 2);
-    }
-  }
-  // 两头封口
-  for (const [i, front] of [[0, false], [n - 1, true]]) {
-    const base = pos.length / 3;
-    for (let k = 0; k < 4; k++) pos.push(...ring[i][k]);
-    if (front) idx.push(base, base + 2, base + 3, base, base + 1, base + 2);
-    else idx.push(base, base + 3, base + 2, base, base + 2, base + 1);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
-
-const sample = (n, f) => Array.from({ length: n + 1 }, (_, i) => f(i / n));
-// 两头密、中间疏：板头板尾的圆角多几个截面才圆
-const sampleEnds = (n, f) => sample(n, (u) => f(0.5 - 0.5 * Math.cos(Math.PI * u)));
-
-// 一块滑雪板的截面：t 从板尾 0 到板头 1。两头宽、中间收腰，头尾按各自的长度往上翘
-function skiStations({ tail, nose, w, waist, tailKick = 0, noseKick = 0, tailLen = 0.16, noseLen = 0.22, th = 0.03, n = 24, y = 0 }) {
-  return sampleEnds(n, (t) => {
-    const a = Math.max(0, 1 - t / tailLen);
-    const b = Math.max(0, (t - (1 - noseLen)) / noseLen);
-    const round = Math.sqrt(Math.min(1, Math.sin(Math.PI * t) * 3.5));
-    return { t, z: tail + (nose - tail) * t, y: y + tailKick * a * a + noseKick * b * b, w: (waist + (w - waist) * (2 * t - 1) ** 2) * round, th };
-  });
-}
-
-// 贴在板面上的一条薄色带：沿用板子的截面，收窄后抬到顶面上。t0 ~ t1 是色带覆盖的范围
-function inlay(st, k, t0 = 0, t1 = 1, up = 0.003) {
-  return st
-    .filter((s) => s.t === undefined || (s.t >= t0 && s.t <= t1))
-    .map((s) => ({ ...s, w: s.w * k, th: 0.008, off: (s.off || 0) + s.th / 2 + up }));
-}
-
-// 垫在板底的一层（钢边、底板）：grow 是比板面宽出多少，负数就是收窄
-function under(st, grow, th) {
-  return st.map((s) => ({ ...s, w: Math.max(0, s.w + grow * Math.min(1, s.w / 0.05)), th, off: (s.off || 0) - s.th / 2 - th / 2 + 0.003 }));
-}
-
-// 加速时才亮的尾焰：尖头朝后
-function flame(p, fx, x, y, z, r, len) {
-  const g = geo('flame', () => new THREE.ConeGeometry(1, 1, 10).rotateX(Math.PI / 2).translate(0, 0, 0.5));
-  const m = soft(put(p, g, flameMat, x, y, z, r, r, len));
-  m.visible = false;
-  m.userData.len = len;
-  fx.flames.push(m);
-}
-
-// 一件装备用到的材质和动画零件表。lam 是 skier.js 的材质缓存；ground 是雪面在当前坐标里的高度
-export function gearKit(lam, main, trim, ground = 0) {
-  return {
-    m: lam,
-    main: lam(main),
-    trim: lam(trim),
-    lit: lam(trim, { emissive: trim, emissiveIntensity: 0.7 }),
-    dark: lam(DARK),
-    steel: lam(STEEL),
-    rubber: lam(RUBBER),
-    white: lam(0xffffff, { emissive: 0xfff2c8, emissiveIntensity: 0.8 }),
-    red: lam(0xff3030, { emissive: 0xff2020, emissiveIntensity: 0.8 }),
-    glass: lam(0xbfe8ff, { transparent: true, opacity: 0.45, side: THREE.DoubleSide }),
-    trimColor: trim,
-    ground,
-    // flames：加速时喷火；spin：一直转的灯圈；wings：{ o, s } 腾空时扇动；flags：随速度飘
-    fx: { flames: [], spin: [], wings: [], flags: [] },
-  };
-}
+const HALF_PI = Math.PI / 2;
+const SKI_TEX = { px: 64, py: 1024 };
+const BOARD_TEX = { px: 256, py: 512 };
 
 // ---------- 双板 ----------
 
-// 高山固定器：底板、前夹、后跟、扳手，brakes 再加两根止滑器
-function skiBinding(g, c, heel, brakes) {
-  box(g, c.dark, 0.12, 0.016, 0.44, 0, 0.022, 0.03);
-  box(g, c.steel, 0.11, 0.05, 0.07, 0, 0.05, -0.19);
-  box(g, heel, 0.1, 0.075, 0.09, 0, 0.06, 0.245);
-  box(g, c.dark, 0.05, 0.02, 0.11, 0, 0.11, 0.3).rotation.x = -0.5;
-  if (brakes) for (const s of [-1, 1]) strut(g, c.steel, [s * 0.075, 0.03, 0.14], [s * 0.085, 0.07, 0.33], 0.008);
+// 高山固定器：底板、前夹（调节盖、刻度窗）、后跟（跟杯、翘起来的扳手）、止滑器、几颗螺丝。lift：垫高板的厚度
+function alpineBinding(g, c, accent, { lift = 0, brakes = true } = {}) {
+  const y = lift;
+  const label = c.m(0xf2f4f6);
+  box(g, c.dark, 0.1, 0.014, 0.52, 0, 0.022 + y, 0.03);
+  box(g, c.steel, 0.09, 0.034, 0.085, 0, 0.044 + y, -0.205);
+  box(g, c.black, 0.114, 0.026, 0.055, 0, 0.07 + y, -0.198);
+  box(g, accent, 0.07, 0.03, 0.03, 0, 0.056 + y, -0.255);
+  box(g, label, 0.03, 0.004, 0.02, 0, 0.0845 + y, -0.205);
+  box(g, accent, 0.094, 0.06, 0.11, 0, 0.055 + y, 0.262);
+  box(g, c.black, 0.106, 0.026, 0.08, 0, 0.096 + y, 0.238);
+  box(g, c.dark, 0.044, 0.016, 0.15, 0, 0.1 + y, 0.335).rotation.x = -0.42;
+  box(g, label, 0.03, 0.004, 0.02, 0, 0.0855 + y, 0.29);
+  if (brakes) {
+    for (const s of [-1, 1]) {
+      strut(g, c.steel, [s * 0.058, 0.03 + y, 0.17], [s * 0.078, 0.004, 0.33], 0.006);
+      box(g, c.rubber, 0.016, 0.014, 0.03, s * 0.079, 0.006, 0.338);
+    }
+  }
+  const pts = [];
+  for (const z of [-0.12, 0.13]) for (const x of [-0.036, 0.036]) pts.push([x, 0.03 + y, z]);
+  put(g, geo('alp.screws' + y, () => studsGeo(pts, 0.007)), c.chrome);
 }
 
-// 雪刃短板：一米出头的双翘短板，不用雪杖
+// 入门双板：经典的山地板。板头一块装饰色斜收白边，板身两道细线和字标，板尾三道斜纹
+const CLASSIC = { tail: 0.78, nose: -0.98, w: 0.125, waist: 0.098, tailKick: 0.035, noseKick: 0.12, tailLen: 0.12, noseLen: 0.2, n: 28 };
+function classic(g, c) {
+  const st = skiStations(CLASSIC);
+  const T = c.trimColor;
+  put(g, geo('classic', () => loftGeo(st)), c.main);
+  put(g, geo('classic.edge', () => loftGeo(under(st, 0.008, 0.008))), c.steel);
+  skin(g, 'classic', st, 0.13, (d, W, L) => {
+    poly(d, [[-W / 2, 0], [W / 2, 0], [W / 2, 0.24], [-W / 2, 0.32]], T);
+    poly(d, [[-W / 2, 0.335], [W / 2, 0.255], [W / 2, 0.272], [-W / 2, 0.352]], WHITE);
+    poly(d, [[-0.04, 0.17], [-0.012, 0.11], [0.004, 0.14], [0.018, 0.12], [0.045, 0.17]], WHITE);
+    for (const x of [-0.042, 0.042]) line(d, [[x, 0.4], [x, L - 0.36]], INK, 0.004, 0.45);
+    text(d, 'SNOWLINE', 0, 0.58, 0.052, INK, { rot: HALF_PI });
+    for (let i = 0; i < 3; i++) {
+      const y = L - 0.3 + i * 0.045;
+      poly(d, [[-W / 2, y + 0.03], [W / 2, y], [W / 2, y + 0.018], [-W / 2, y + 0.048]], T);
+    }
+    rect(d, -W / 2, L - 0.12, W, 0.12, T);
+    text(d, '168', 0, L - 0.42, 0.032, INK, { rot: HALF_PI, a: 0.7 });
+  }, SKI_TEX);
+  alpineBinding(g, c, c.trim);
+}
+
+// 竞赛双板：大回转板，更长更窄；板头黑白格、三道斜切色带、号码牌，脚下一块加高的竞赛垫板
+const GS = { tail: 0.86, nose: -1.1, w: 0.118, waist: 0.09, tailKick: 0.022, noseKick: 0.1, tailLen: 0.08, noseLen: 0.17, n: 30 };
+function race(g, c) {
+  const st = skiStations(GS);
+  const T = c.trimColor;
+  put(g, geo('race', () => loftGeo(st)), c.main);
+  put(g, geo('race.edge', () => loftGeo(under(st, 0.008, 0.008))), c.steel);
+  skin(g, 'race', st, 0.12, (d, W, L) => {
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) rect(d, -W / 2 + (j * W) / 2, 0.05 + i * 0.045, W / 2, 0.045, (i + j) % 2 ? INK : WHITE);
+    for (let i = 0; i < 3; i++) {
+      const y = 0.3 + i * 0.085;
+      poly(d, [[-W / 2, y + 0.06], [W / 2, y], [W / 2, y + 0.04], [-W / 2, y + 0.1]], i === 1 ? INK : T);
+    }
+    text(d, 'RACE', 0, 0.68, 0.06, WHITE, { rot: HALF_PI, stroke: INK, strokeW: 0.25 });
+    for (const x of [-W / 2 + 0.006, W / 2 - 0.006]) line(d, [[x, 0.62], [x, L - 0.2]], T, 0.006);
+    round(d, -0.042, L - 0.34, 0.084, 0.14, 0.014);
+    d.fillStyle = css(WHITE);
+    d.fill();
+    text(d, '07', 0, L - 0.27, 0.06, INK, { rot: HALF_PI });
+    rect(d, -W / 2, L - 0.12, W, 0.12, T);
+    text(d, 'GS', 0, L - 0.06, 0.045, INK, { rot: HALF_PI });
+  }, SKI_TEX);
+  // 竞赛垫板：两侧各一道装饰色、四颗螺丝
+  box(g, c.dark, 0.084, 0.022, 0.68, 0, 0.026, 0.04);
+  for (const s of [-1, 1]) box(g, c.trim, 0.003, 0.01, 0.62, s * 0.0425, 0.027, 0.04);
+  put(g, geo('race.studs', () => studsGeo([[-0.03, 0.037, -0.27], [0.03, 0.037, -0.27], [-0.03, 0.037, 0.35], [0.03, 0.037, 0.35]], 0.006)), c.chrome);
+  alpineBinding(g, c, c.trim, { lift: 0.014 });
+}
+
+// 碳纤维双板：板身中段整块碳纤维编织，发光的细线勾边，板头包一块金属护片，脚下是登山式的轻量固定器
+const CARBON = { tail: 0.82, nose: -1.04, w: 0.122, waist: 0.092, tailKick: 0.03, noseKick: 0.11, tailLen: 0.1, noseLen: 0.19, th: 0.026, n: 30 };
+function carbon(g, c) {
+  const st = skiStations(CARBON);
+  const T = c.trimColor;
+  put(g, geo('carbon', () => loftGeo(st)), c.main);
+  put(g, geo('carbon.edge', () => loftGeo(under(st, 0.008, 0.008))), c.steel);
+  put(g, geo('carbon.cap', () => loftGeo(inlay(st, 0.94, 0.94, 1, 0.001))), c.chrome);
+  skin(g, 'carbon', st, 0.13, (d, W, L) => {
+    weave(d, -W / 2, 0.22, W / 2, L - 0.16, 0.011);
+    poly(d, [[-W / 2, 0.22], [W / 2, 0.16], [W / 2, 0.22]], 0x1b1e26);
+    rect(d, -W / 2, L - 0.16, W, 0.008, WHITE, 0.7);
+    text(d, 'CARBON', 0.012, 0.6, 0.05, WHITE, { rot: HALF_PI, a: 0.9 });
+    text(d, 'ULTRA LIGHT', -0.026, 0.6, 0.018, WHITE, { rot: HALF_PI, a: 0.6, weight: 700 });
+  }, SKI_TEX);
+  skin(g, 'carbon.glow', st, 0.13, (d, W, L) => {
+    for (const x of [-W / 2 + 0.008, W / 2 - 0.008]) line(d, [[x, 0.3], [x, L - 0.24]], T, 0.0045);
+    line(d, [[-W / 2, 0.228], [W / 2, 0.168]], T, 0.005);
+    for (let i = 0; i < 5; i++) rect(d, -0.004, L - 0.42 + i * 0.04, 0.008, 0.022, T);
+    text(d, 'CX-9', 0, 0.36, 0.04, T, { rot: HALF_PI });
+  }, { ...SKI_TEX, glow: true, lift: 0.0025 });
+  // 登山式固定器：碳纤维薄底板、两片夹针的前座、一根跟柱
+  box(g, c.black, 0.07, 0.01, 0.5, 0, 0.02, 0.03);
+  box(g, c.dark, 0.08, 0.024, 0.07, 0, 0.032, -0.205);
+  for (const s of [-1, 1]) box(g, c.chrome, 0.014, 0.042, 0.03, s * 0.042, 0.056, -0.2);
+  box(g, c.lit, 0.03, 0.01, 0.07, 0, 0.05, -0.245).rotation.x = 0.4;
+  put(g, PRIM.cyl, c.dark, 0, 0.058, 0.252, 0.036, 0.074, 0.036);
+  put(g, PRIM.cyl, c.lit, 0, 0.098, 0.252, 0.038, 0.01, 0.038);
+  for (const s of [-1, 1]) {
+    box(g, c.chrome, 0.008, 0.008, 0.032, s * 0.015, 0.076, 0.222);
+    strut(g, c.steel, [s * 0.05, 0.026, 0.19], [s * 0.074, 0.004, 0.33], 0.005);
+  }
+}
+
+// 极光双板：深夜蓝的板面上一层会发光的极光帘幕和星点，侧壁是主色，钢边换成发光的边，
+// 板头长出一簇冰晶，跟座后面嵌一颗晶石
+const AURORA = { tail: 0.84, nose: -1.08, w: 0.13, waist: 0.1, tailKick: 0.05, noseKick: 0.13, tailLen: 0.12, noseLen: 0.21, n: 30 };
+function aurora(g, c) {
+  const st = skiStations(AURORA);
+  put(g, geo('aurora', () => loftGeo(st)), c.m(0x161a38));
+  put(g, geo('aurora.side', () => loftGeo(under(st, 0.006, 0.014))), c.main);
+  put(g, geo('aurora.edge', () => loftGeo(under(st, 0.012, 0.008).map((s) => ({ ...s, off: s.off - 0.01 })))), c.lit);
+  skin(g, 'aurora', st, 0.14, (d, W, L) => {
+    const cols = [0xb388ff, 0x3fe0ff, 0x8cff5a];
+    for (let k = 0; k < 3; k++) {
+      const gr = d.createLinearGradient(0, 0, 0, L);
+      for (let i = 0; i <= 6; i++) gr.addColorStop(i / 6, css(cols[(i + k) % 3], 0.85));
+      d.fillStyle = gr;
+      d.beginPath();
+      const x0 = -0.035 + k * 0.035;
+      for (let y = 0.05; y <= L - 0.05; y += 0.02) d.lineTo(x0 + Math.sin(y * 7 + k * 2) * 0.022, y);
+      for (let y = L - 0.05; y >= 0.05; y -= 0.02) d.lineTo(x0 + 0.012 + Math.sin(y * 7 + k * 2 + 0.5) * 0.026, y);
+      d.closePath();
+      d.fill();
+    }
+    const r = rng(11);
+    for (let i = 0; i < 26; i++) star(d, (r() - 0.5) * W * 0.9, 0.08 + r() * (L - 0.16), 0.006 + r() * 0.008, WHITE, { n: 4, inner: 0.3 });
+  }, { ...SKI_TEX, glow: true });
+  // 板头的冰晶：中间一根长的，两边各一根斜出去的短的
+  const crystal = c.m(c.trimColor, { emissive: c.trimColor, emissiveIntensity: 0.55, transparent: true, opacity: 0.85 });
+  for (const [x, len, tilt, side] of [[0, 0.16, 0.5, 0], [-0.024, 0.1, 0.65, 0.45], [0.024, 0.1, 0.65, -0.45]]) {
+    const m = put(g, PRIM.ico, crystal, x, 0.14, -0.99, 0.022, len / 2, 0.022);
+    m.rotation.set(-tilt - 0.6, 0, side);
+  }
+  soft(put(g, PRIM.sphere, glowMat(c.trimColor, 0.35), 0, 0.15, -1.0, 0.07));
+  alpineBinding(g, c, c.lit);
+  put(g, PRIM.ico, crystal, 0, 0.13, 0.33, 0.026, 0.04, 0.026);
+}
+
+// 雪刃短板：一米出头的双翘短板，不用雪杖。加宽的镀铬刃边，板面一道锯齿色带和刀痕
 const BLADE = { tail: 0.5, nose: -0.62, w: 0.14, waist: 0.112, tailKick: 0.07, noseKick: 0.12, tailLen: 0.24, noseLen: 0.28, n: 22 };
 function blades(g, c) {
-  put(g, geo('blade', () => loftGeo(skiStations(BLADE))), c.main);
-  put(g, geo('blade.top', () => loftGeo(inlay(skiStations(BLADE), 0.5, 0.14, 0.86))), c.trim);
-  put(g, geo('blade.edge', () => loftGeo(under(skiStations(BLADE), 0.012, 0.01))), c.steel);
-  skiBinding(g, c, c.trim, false);
+  const st = skiStations(BLADE);
+  const T = c.trimColor;
+  put(g, geo('blade', () => loftGeo(st)), c.main);
+  put(g, geo('blade.edge', () => loftGeo(under(st, 0.018, 0.012))), c.chrome);
+  for (const [t0, t1] of [[0, 0.07], [0.93, 1]]) put(g, geo('blade.cap' + t0, () => loftGeo(inlay(st, 0.96, t0, t1, 0.001))), c.chrome);
+  skin(g, 'blades', st, 0.15, (d, W, L) => {
+    const pts = [];
+    for (let y = 0.16, i = 0; y <= L - 0.16; y += 0.03, i++) pts.push([(i % 2 ? 0.034 : 0.022), y]);
+    for (let y = L - 0.16, i = 0; y >= 0.16; y -= 0.03, i++) pts.push([-(i % 2 ? 0.034 : 0.022), y]);
+    poly(d, pts, T);
+    line(d, [[0, 0.2], [0, L - 0.2]], INK, 0.006, 0.8);
+    for (const y of [0.12, L - 0.14]) for (let i = 0; i < 3; i++) poly(d, [[-W / 2, y + i * 0.022], [W / 2, y - 0.03 + i * 0.022], [W / 2, y - 0.022 + i * 0.022], [-W / 2, y + 0.008 + i * 0.022]], INK, 0.7);
+    text(d, 'BLADE', 0, 0.3, 0.036, WHITE, { rot: HALF_PI, stroke: INK, strokeW: 0.3 });
+  }, { px: 64, py: 512 });
+  alpineBinding(g, c, c.trim, { brakes: false });
 }
 
-// 自由式双翘板：头尾都翘得高，板面两层色带，钢边，带止滑器的固定器
+// 自由式双翘板：头尾都翘得高；板面是喷漆涂鸦（泡泡字、喷圈、星星、滴落的漆）
 const TWIN = { tail: 0.84, nose: -0.98, w: 0.136, waist: 0.104, tailKick: 0.11, noseKick: 0.15, tailLen: 0.15, noseLen: 0.19, n: 30 };
 function twin(g, c) {
-  put(g, geo('twin', () => loftGeo(skiStations(TWIN))), c.main);
-  put(g, geo('twin.top', () => loftGeo(inlay(skiStations(TWIN), 0.58, 0.1, 0.9))), c.trim);
-  put(g, geo('twin.line', () => loftGeo(inlay(skiStations(TWIN), 0.16, 0.18, 0.82, 0.011))), c.m(0xffffff));
-  put(g, geo('twin.edge', () => loftGeo(under(skiStations(TWIN), 0.012, 0.01))), c.steel);
-  skiBinding(g, c, c.trim, true);
+  const st = skiStations(TWIN);
+  const T = c.trimColor;
+  put(g, geo('twin', () => loftGeo(st)), c.main);
+  put(g, geo('twin.edge', () => loftGeo(under(st, 0.012, 0.01))), c.steel);
+  skin(g, 'twin', st, 0.14, (d, W, L) => {
+    for (const y of [0.18, L - 0.2]) {
+      ring(d, 0, y, 0.045, 0.014, T, 0.9);
+      ring(d, 0, y, 0.022, 0.008, INK, 0.8);
+    }
+    rect(d, -0.03, 0.32, 0.06, L - 0.64, T);
+    for (let y = 0.4; y < L - 0.4; y += 0.11) rect(d, -0.03 + ((y * 37) % 0.05), y, 0.008, 0.03 + ((y * 53) % 0.04), T);
+    text(d, 'TWIN', 0, 0.55, 0.07, WHITE, { rot: HALF_PI, stroke: INK, strokeW: 0.28 });
+    text(d, 'TIP', 0, L - 0.55, 0.07, WHITE, { rot: HALF_PI, stroke: INK, strokeW: 0.28 });
+    const r = rng(5);
+    for (let i = 0; i < 9; i++) star(d, (r() - 0.5) * W * 0.7, 0.3 + r() * (L - 0.6), 0.012 + r() * 0.01, i % 2 ? WHITE : 0xffd23c, { rot: r() });
+  }, SKI_TEX);
+  alpineBinding(g, c, c.trim);
 }
 
-// 机甲双板：宽板身 + 前后装甲 + 发光能量槽，板尾各背一台推进器
+// 机甲双板：宽板身 + 前后装甲（分件缝、警示牌、编号、条形码）+ 发光能量槽，板尾各背一台推进器
 const MECH = { tail: 0.78, nose: -1.06, w: 0.2, waist: 0.17, tailKick: 0.04, noseKick: 0.2, tailLen: 0.1, noseLen: 0.22, th: 0.035, n: 28 };
+const MECH_FRONT = [
+  { z: -0.22, y: 0.03, w: 0.15, th: 0.045 },
+  { z: -0.4, y: 0.045, w: 0.18, th: 0.07 },
+  { z: -0.62, y: 0.045, w: 0.17, th: 0.07 },
+  { z: -0.84, y: 0.07, w: 0.1, th: 0.035 },
+];
+const MECH_REAR = [
+  { z: 0.74, y: 0.035, w: 0.12, th: 0.04 },
+  { z: 0.6, y: 0.045, w: 0.17, th: 0.07 },
+  { z: 0.36, y: 0.045, w: 0.17, th: 0.07 },
+  { z: 0.26, y: 0.035, w: 0.15, th: 0.045 },
+];
 function mech(g, c) {
   put(g, geo('mech', () => loftGeo(skiStations(MECH))), c.dark);
   put(g, geo('mech.edge', () => loftGeo(under(skiStations(MECH), 0.018, 0.012))), c.lit);
-  const front = geo('mech.front', () =>
-    loftGeo([
-      { z: -0.22, y: 0.03, w: 0.15, th: 0.045 },
-      { z: -0.4, y: 0.045, w: 0.18, th: 0.07 },
-      { z: -0.62, y: 0.045, w: 0.17, th: 0.07 },
-      { z: -0.84, y: 0.07, w: 0.1, th: 0.035 },
-    ])
-  );
-  const rear = geo('mech.rear', () =>
-    loftGeo([
-      { z: 0.74, y: 0.035, w: 0.12, th: 0.04 },
-      { z: 0.6, y: 0.045, w: 0.17, th: 0.07 },
-      { z: 0.36, y: 0.045, w: 0.17, th: 0.07 },
-      { z: 0.26, y: 0.035, w: 0.15, th: 0.045 },
-    ])
-  );
-  put(g, front, c.main);
-  put(g, rear, c.main);
+  put(g, geo('mech.front', () => loftGeo(MECH_FRONT)), c.main);
+  put(g, geo('mech.rear', () => loftGeo(MECH_REAR)), c.main);
+  skin(g, 'mech.front', MECH_FRONT, 0.19, (d, W, L) => {
+    hazard(d, -W / 2, 0, W, 0.07, 0.018);
+    line(d, [[-0.06, 0.1], [0.06, 0.1], [0.075, 0.2], [0.075, 0.5], [-0.075, 0.5], [-0.075, 0.2]], INK, 0.004, 0.55, true);
+    line(d, [[-0.075, 0.33], [0.075, 0.33]], INK, 0.004, 0.55);
+    warn(d, -0.035, 0.25, 0.05, HALF_PI);
+    text(d, 'MK-7', 0.03, 0.26, 0.032, INK, { rot: HALF_PI });
+    barcode(d, -0.055, 0.38, 0.07, 0.04, 3);
+    dotRow(d, [[-0.065, 0.12], [0.065, 0.12], [-0.068, 0.48], [0.068, 0.48]], 0.006, INK, 0.7);
+  }, { px: 128, py: 512 });
+  skin(g, 'mech.rear', MECH_REAR, 0.19, (d, W, L) => {
+    line(d, [[-0.075, 0.04], [0.075, 0.04], [0.075, 0.42], [-0.075, 0.42]], INK, 0.004, 0.55, true);
+    text(d, '07', 0, 0.2, 0.08, WHITE, { stroke: INK, strokeW: 0.25, rot: HALF_PI });
+    for (let i = 0; i < 4; i++) rect(d, -0.05, 0.31 + i * 0.022, 0.1, 0.01, INK, 0.75);
+    hazard(d, -W / 2, L - 0.06, W, 0.06, 0.018);
+  }, { px: 128, py: 512 });
   box(g, c.lit, 0.035, 0.012, 0.2, 0, 0.083, -0.51);
   box(g, c.lit, 0.035, 0.012, 0.2, 0, 0.083, 0.48);
+  // 装甲两侧的进气口、一排螺丝
+  for (const s of [-1, 1]) {
+    box(g, c.black, 0.012, 0.035, 0.12, s * 0.092, 0.05, -0.5);
+    for (let i = 0; i < 3; i++) box(g, c.lit, 0.004, 0.006, 0.09, s * 0.0985, 0.04 + i * 0.012, -0.5);
+  }
+  const bolts = [];
+  for (const z of [-0.3, -0.7]) for (const x of [-0.06, 0.06]) bolts.push([x, 0.084, z]);
+  for (const z of [0.3, 0.66]) for (const x of [-0.06, 0.06]) bolts.push([x, 0.084, z]);
+  put(g, geo('mech.bolts', () => studsGeo(bolts, 0.008)), c.chrome);
   // 板头的撞角
   put(g, PRIM.cone, c.lit, 0, 0.21, -1.0, 0.035, 0.2, 0.035).rotation.x = -1.1;
-  // 推进器：筒身、喷口、发光的芯、背鳍
+  // 推进器：筒身、两道散热环、喷口、发光的芯、背鳍
   rod(g, c.steel, 0.05, 0.26, 0, 0.13, 0.64);
+  for (const z of [0.58, 0.68]) rod(g, c.dark, 0.054, 0.018, 0, 0.13, z);
   rod(g, c.dark, 0.058, 0.05, 0, 0.13, 0.78);
   ball(g, c.lit, 0.04, 0.04, 0.02, 0, 0.13, 0.805);
   put(g, geo('mech.fin', () => plateGeo([[0, 0], [-0.2, 0], [-0.26, 0.12]], 0.012, true)), c.trim, 0, 0.18, 0.56);
   flame(g, c.fx, 0, 0.13, 0.81, 0.045, 0.4);
   // 夹住靴子的装甲固定器
   box(g, c.dark, 0.14, 0.016, 0.42, 0, 0.022, 0.03);
-  for (const s of [-1, 1]) box(g, c.main, 0.02, 0.09, 0.3, s * 0.1, 0.06, 0.02);
+  for (const s of [-1, 1]) {
+    box(g, c.main, 0.02, 0.09, 0.3, s * 0.1, 0.06, 0.02);
+    box(g, c.lit, 0.004, 0.012, 0.22, s * 0.111, 0.08, 0.02);
+  }
   box(g, c.steel, 0.13, 0.05, 0.06, 0, 0.05, -0.19);
   box(g, c.lit, 0.1, 0.07, 0.07, 0, 0.06, 0.235);
 }
 
 // ---------- 单板 ----------
 
-// 绑带固定器：底盘、高背板、脚背和脚趾两条绑带
-function strapBinding(v, c, x, z, mat) {
-  box(v, c.dark, 0.2, 0.02, 0.36, x, 0.05, z);
-  box(v, mat, 0.17, 0.24, 0.025, x, 0.18, z + 0.205).rotation.x = 0.16;
+// 单板固定器：底盘（中间圆盘四颗螺丝）、跟杯、弯成弧的高背，脚背宽绑带、脚尖细绑带，外侧两个棘轮扣
+function boardBinding(v, c, x, z, accent) {
+  const shell = c.m(accent, { side: THREE.DoubleSide });
+  const acc = c.m(accent);
+  put(v, geo('bb.base', () => plateGeo([[-0.085, -0.16], [0.085, -0.16], [0.092, 0.08], [0.065, 0.165], [-0.065, 0.165], [-0.092, 0.08]], 0.02, false)), c.dark, x, 0.05, z);
+  put(v, PRIM.cyl, c.black, x, 0.062, z - 0.01, 0.062, 0.006, 0.062);
+  put(v, geo('bb.screws', () => studsGeo([[-0.034, 0, -0.034], [0.034, 0, -0.034], [-0.034, 0, 0.034], [0.034, 0, 0.034]], 0.008)), c.chrome, x, 0.068, z - 0.01);
+  put(v, geo('bb.cup', () => new THREE.TorusGeometry(0.085, 0.013, 6, 14, Math.PI).rotateX(HALF_PI)), c.dark, x, 0.075, z + 0.06);
+  const hb = put(v, geo('bb.hb', () => new THREE.CylinderGeometry(0.09, 0.084, 0.25, 14, 1, true, -HALF_PI, Math.PI)), shell, x, 0.2, z + 0.07);
+  hb.rotation.x = 0.14;
+  const spine = box(v, c.black, 0.03, 0.2, 0.012, x, 0.205, z + 0.165);
+  spine.rotation.x = 0.14;
   const strap = geo('strap', () => new THREE.TorusGeometry(0.135, 0.015, 6, 12, Math.PI));
-  put(v, strap, mat, x, 0.06, z - 0.09, 0.75, 1.55, 2.6);
-  put(v, strap, mat, x, 0.06, z + 0.07, 0.75, 1.55, 2.6);
+  put(v, strap, c.black, x, 0.06, z + 0.04, 0.76, 1.55, 3.2);
+  put(v, strap, acc, x, 0.06, z - 0.1, 0.74, 1.35, 2.2);
+  const out = Math.sign(x) || 1;
+  box(v, c.chrome, 0.02, 0.05, 0.036, x + out * 0.1, 0.11, z + 0.04);
+  box(v, c.chrome, 0.018, 0.04, 0.03, x + out * 0.098, 0.09, z - 0.1);
 }
 
-// 鱼尾粉雪板：宽而翘的圆板头，板尾分成燕尾
+// 入门单板：圆头圆尾的软板，一圈加厚的软包边、头尾护角；板面画一朵大雪花和波点
+const learnDeck = () =>
+  sampleEnds(28, (t) => {
+    const a = Math.max(0, 1 - t / 0.15);
+    const b = Math.max(0, (t - 0.85) / 0.15);
+    return { t, z: 0.68 - 1.38 * t, y: 0.02 + 0.085 * (a * a + b * b), w: 0.5 * Math.sqrt(Math.min(1, Math.sin(Math.PI * t) * 3)), th: 0.04 };
+  });
+function learner(v, c) {
+  const st = learnDeck();
+  const T = c.trimColor;
+  put(v, geo('learn', () => loftGeo(st)), c.main);
+  put(v, geo('learn.edge', () => loftGeo(under(st, 0.026, 0.024))), c.trim);
+  for (const [t0, t1] of [[0, 0.06], [0.94, 1]]) put(v, geo('learn.tip' + t0, () => loftGeo(inlay(st, 1.02, t0, t1, 0.001))), c.trim);
+  skin(v, 'learner', st, 0.52, (d, W, L) => {
+    const mid = 0.7;
+    circle(d, 0, mid, 0.17, T, 0.55);
+    snowflake(d, 0, mid, 0.13, WHITE, 0.02);
+    ring(d, 0, mid, 0.2, 0.008, INK, 0.35);
+    const r = rng(9);
+    for (const [y0, y1] of [[0.12, 0.42], [L - 0.42, L - 0.12]]) {
+      for (let y = y0; y < y1; y += 0.06) for (let x = -0.2; x <= 0.2; x += 0.06) circle(d, x + (((y * 100) | 0) % 2) * 0.03, y, 0.012 + r() * 0.008, T, 0.85);
+    }
+    text(d, 'LEARN', 0, 0.36, 0.07, INK, { a: 0.85, rot: Math.PI });
+    text(d, 'FIRST RIDE', 0, L - 0.4, 0.04, INK, { a: 0.7, weight: 700, rot: Math.PI });
+    poly(d, [[0, 0.04], [0.035, 0.09], [-0.035, 0.09]], INK, 0.6);
+  }, BOARD_TEX);
+  box(v, c.rubber, 0.12, 0.008, 0.16, 0, 0.044, -0.3);
+  for (let i = 0; i < 4; i++) box(v, c.m(0x2b2f3a), 0.1, 0.006, 0.012, 0, 0.05, -0.36 + i * 0.04);
+  for (const s of [-1, 1]) boardBinding(v, c, s * 0.17, 0.02, T);
+}
+
+// 单板：全能的方向板，板头长、板尾短；板面是一排雪山和太阳，板头一行大字标，两道沿边的细线
+const mtnDeck = () =>
+  sampleEnds(30, (t) => {
+    const a = Math.max(0, 1 - t / 0.1);
+    const b = Math.max(0, (t - 0.82) / 0.18);
+    const w = 0.5 + 0.06 * (2 * t - 1) ** 2;
+    return { t, z: 0.7 - 1.52 * t, y: 0.02 + 0.06 * a * a + 0.14 * b * b, w: w * Math.sqrt(Math.min(1, Math.sin(Math.PI * t) * 3.4)), th: 0.04 };
+  });
+function allMountain(v, c) {
+  const st = mtnDeck();
+  const T = c.trimColor;
+  put(v, geo('mtn', () => loftGeo(st)), c.main);
+  put(v, geo('mtn.side', () => loftGeo(under(st, 0.008, 0.014))), c.black);
+  put(v, geo('mtn.edge', () => loftGeo(under(st, 0.014, 0.006).map((s) => ({ ...s, off: s.off - 0.01 })))), c.steel);
+  skin(v, 'board', st, 0.58, (d, W, L) => {
+    for (const x of [-0.22, 0.22]) line(d, [[x, 0.1], [x, L - 0.06]], T, 0.01);
+    text(d, 'SUMMIT', 0, 0.4, 0.11, T, { squash: 0.9, rot: Math.PI });
+    text(d, 'ALL MOUNTAIN', 0, 0.3, 0.032, INK, { a: 0.7, weight: 700, rot: Math.PI });
+    // 板尾一排雪山（从板头这边看是立着的：山脚朝板头、山尖朝板尾），后面一轮太阳
+    const b = L - 0.5;
+    circle(d, -0.06, b + 0.3, 0.1, T, 0.9);
+    ring(d, -0.06, b + 0.3, 0.13, 0.008, T, 0.6);
+    const far = [[-0.3, b + 0.1], [-0.22, b + 0.2], [-0.15, b + 0.14], [0.02, b + 0.3], [0.12, b + 0.18], [0.2, b + 0.24], [0.3, b + 0.12], [0.3, b - 0.02], [-0.3, b - 0.02]];
+    poly(d, far, shade(T, 0.55), 0.85);
+    const near = [[-0.3, b + 0.02], [-0.14, b + 0.09], [-0.05, b + 0.05], [0.1, b + 0.14], [0.22, b + 0.06], [0.3, b + 0.08], [0.3, b - 0.04], [-0.3, b - 0.04]];
+    poly(d, near, INK, 0.75);
+    poly(d, [[-0.04, b + 0.24], [0.02, b + 0.3], [0.07, b + 0.25], [0.04, b + 0.26], [0.0, b + 0.23]], WHITE);
+    poly(d, [[-0.25, b + 0.17], [-0.22, b + 0.2], [-0.19, b + 0.18]], WHITE);
+    poly(d, [[0.17, b + 0.22], [0.2, b + 0.24], [0.23, b + 0.21]], WHITE);
+    for (let i = 0; i < 3; i++) line(d, [[-0.3, b - 0.07 - i * 0.03], [0.3, b - 0.07 - i * 0.03]], T, 0.008, 0.7 - i * 0.2);
+  }, BOARD_TEX);
+  for (const s of [-1, 1]) boardBinding(v, c, s * 0.17, 0.02, T);
+}
+
+// 公园单板：短而宽的双翘板，板面贴满贴纸（星星、爱心、闪电、圆标、条形码、字块），前面一块星形止滑垫
+const parkDeck = () =>
+  sampleEnds(30, (t) => {
+    const a = Math.max(0, 1 - t / 0.13);
+    const b = Math.max(0, (t - 0.87) / 0.13);
+    return { t, z: 0.7 - 1.42 * t, y: 0.02 + 0.1 * (a * a + b * b), w: (0.52 + 0.04 * (2 * t - 1) ** 2) * Math.sqrt(Math.min(1, Math.sin(Math.PI * t) * 3.6)), th: 0.038 };
+  });
+function stickerBomb(d, W, L, T) {
+  const r = rng(21);
+  const pal = [T, 0xffd23c, 0x3fe0ff, 0x8cff5a, WHITE, 0xff6a1f];
+  const words = ['PARK', 'JIB', 'SHRED', 'NO.1', 'GO!'];
+  let n = 0;
+  for (let y = 0.1; y < L - 0.05; y += 0.13) {
+    for (let x = -0.2; x <= 0.21; x += 0.135) {
+      const cx = x + (r() - 0.5) * 0.04;
+      const cy = y + (r() - 0.5) * 0.04;
+      const col = pal[(r() * pal.length) | 0];
+      const kind = n++ % 7;
+      d.save();
+      d.translate(cx, cy);
+      d.rotate(Math.PI + (r() - 0.5) * 1.2);
+      if (kind === 0) {
+        star(d, 0, 0, 0.06, WHITE);
+        star(d, 0, 0, 0.046, col);
+      } else if (kind === 1) {
+        heart(d, 0, 0, 0.05, WHITE);
+        heart(d, 0, 0, 0.038, col === WHITE ? T : col);
+      } else if (kind === 2) {
+        round(d, -0.06, -0.028, 0.12, 0.056, 0.012);
+        d.fillStyle = css(col === WHITE ? INK : col);
+        d.fill();
+        text(d, words[(r() * words.length) | 0], 0, 0.002, 0.034, WHITE, { squash: 0.85 });
+      } else if (kind === 3) {
+        circle(d, 0, 0, 0.05, INK);
+        ring(d, 0, 0, 0.038, 0.008, col === INK ? WHITE : col);
+        text(d, 'P', 0, 0.003, 0.042, WHITE);
+      } else if (kind === 4) {
+        poly(d, [[-0.01, -0.06], [0.03, -0.06], [0.008, -0.01], [0.034, -0.01], [-0.02, 0.06], [-0.004, 0.006], [-0.03, 0.006]], col === WHITE ? HAZARD : col);
+      } else if (kind === 5) {
+        barcode(d, -0.05, -0.025, 0.1, 0.05, n);
+      } else {
+        circle(d, 0, 0, 0.048, HAZARD);
+        circle(d, -0.016, -0.01, 0.006, INK);
+        circle(d, 0.016, -0.01, 0.006, INK);
+        ring(d, 0, 0.004, 0.026, 0.006, INK, 1, 0.3, Math.PI - 0.3);
+      }
+      d.restore();
+    }
+  }
+}
+function park(v, c) {
+  const st = parkDeck();
+  const T = c.trimColor;
+  put(v, geo('park', () => loftGeo(st)), c.main);
+  put(v, geo('park.side', () => loftGeo(under(st, 0.01, 0.014))), c.trim);
+  put(v, geo('park.edge', () => loftGeo(under(st, 0.016, 0.006).map((s) => ({ ...s, off: s.off - 0.01 })))), c.steel);
+  skin(v, 'park', st, 0.6, (d, W, L) => stickerBomb(d, W, L, T), BOARD_TEX);
+  put(v, geo('park.pad', () => {
+    const pts = [];
+    for (let i = 0; i < 10; i++) {
+      const k = i % 2 ? 0.035 : 0.08;
+      const a = -HALF_PI + (i * Math.PI) / 5;
+      pts.push([Math.cos(a) * k, -Math.sin(a) * k]);
+    }
+    return plateGeo(pts, 0.008, false);
+  }), c.rubber, 0, 0.044, -0.32);
+  for (const s of [-1, 1]) boardBinding(v, c, s * 0.17, 0.02, T);
+}
+
+// 风暴单板：箭头一样的尖板头、切角板尾；两侧发光包边，板面是乌云卷涡加几道发亮的闪电，
+// 板头两侧张开一对刃翼，板尾两台推进器套着发光的线圈
+const stormDeck = () =>
+  sample(34, (t) => {
+    const a = Math.max(0, 1 - t / 0.1);
+    const b = Math.max(0, (t - 0.74) / 0.26);
+    let w;
+    if (t < 0.06) w = 0.42 + 0.14 * (t / 0.06);
+    else if (t < 0.7) w = 0.56 - 0.05 * Math.sin((Math.PI * (t - 0.06)) / 0.64);
+    else w = 0.56 * (1 - ((t - 0.7) / 0.3) ** 1.3);
+    return { t, z: 0.72 - 1.64 * t, y: 0.02 + 0.06 * a * a + 0.16 * b * b, w: Math.max(0.012, w), th: 0.042 };
+  });
+function storm(v, c) {
+  const st = stormDeck();
+  const T = c.trimColor;
+  put(v, geo('storm', () => loftGeo(st)), c.main);
+  put(v, geo('storm.base', () => loftGeo(under(st, 0.014, 0.014))), c.black);
+  const rail = geo('storm.rail', () => loftGeo(railOf(st, 0.014, 0.02, 0.02, 0.985)));
+  for (const s of [-1, 1]) put(v, rail, c.lit).scale.x = s;
+  skin(v, 'storm', st, 0.58, (d, W, L) => {
+    d.save();
+    d.globalAlpha = 0.5;
+    for (const [x, y, s, f] of [[-0.12, 0.62, 0.12, 1], [0.13, 0.78, 0.1, -1], [-0.05, 1.12, 0.14, 1], [0.1, 1.38, 0.09, -1]]) {
+      d.lineWidth = 0.03;
+      d.strokeStyle = css(INK);
+      d.beginPath();
+      for (let i = 0; i <= 36; i++) {
+        const a = (i / 36) * Math.PI * 3;
+        const k = s * (1 - i / 44);
+        i ? d.lineTo(x + f * Math.cos(a) * k, y + Math.sin(a) * k * 0.7) : d.moveTo(x + f * Math.cos(a) * k, y + Math.sin(a) * k * 0.7);
+      }
+      d.stroke();
+    }
+    d.restore();
+    poly(d, [[-0.26, L - 0.1], [0.26, L - 0.1], [0.2, L - 0.26], [-0.2, L - 0.26]], INK, 0.6);
+    text(d, 'STORM', 0, L - 0.18, 0.08, T, { rot: Math.PI });
+    chevrons(d, 0, 0.18, 0.16, 0.04, 3, 0.055, INK, 0.65);
+  }, BOARD_TEX);
+  skin(v, 'storm.bolt', st, 0.58, (d, W, L) => {
+    bolt(d, -0.2, 0.42, 0.05, 0.98, 0.028, 0xffe27a, { seed: 4, kinks: 5 });
+    bolt(d, -0.2, 0.42, 0.05, 0.98, 0.012, WHITE, { seed: 4, kinks: 5 });
+    bolt(d, 0.22, 0.7, -0.02, 1.32, 0.024, T, { seed: 9, kinks: 4 });
+    bolt(d, 0.22, 0.7, -0.02, 1.32, 0.01, 0xffe27a, { seed: 9, kinks: 4 });
+    bolt(d, 0.04, 1.0, 0.16, 1.2, 0.014, T, { seed: 2, kinks: 3 });
+  }, { ...BOARD_TEX, glow: true, lift: 0.0025 });
+  // 板头两侧的刃翼：深色刃身加一道发光刃口，往外张开
+  const blade = geo('storm.wing', () => plateGeo([[0, 0], [-0.34, 0.02], [-0.42, 0.1], [-0.18, 0.06]], 0.014, true));
+  const edge = geo('storm.wing.edge', () => plateGeo([[-0.1, 0.055], [-0.42, 0.1], [-0.34, 0.075]], 0.016, true));
+  for (const s of [-1, 1]) {
+    const w = new THREE.Group();
+    w.position.set(s * 0.2, 0.06, -0.26);
+    w.rotation.z = -s * 0.75;
+    put(w, blade, c.dark);
+    put(w, edge, c.lit);
+    v.add(w);
+    // 板尾推进器和线圈
+    rod(v, c.steel, 0.038, 0.16, s * 0.13, 0.075, 0.66);
+    rod(v, c.dark, 0.044, 0.03, s * 0.13, 0.075, 0.74);
+    const coil = geo('storm.coil', () => new THREE.TorusGeometry(0.055, 0.008, 6, 20));
+    for (const z of [0.61, 0.67]) put(v, coil, c.lit, s * 0.13, 0.075, z);
+    flame(v, c.fx, s * 0.13, 0.075, 0.755, 0.034, 0.34);
+    boardBinding(v, c, s * 0.17, 0.02, T);
+  }
+  put(v, PRIM.ico, c.lit, 0, 0.11, -0.66, 0.04, 0.03, 0.06);
+  soft(put(v, PRIM.sphere, glowMat(T, 0.3), 0, 0.11, -0.66, 0.09));
+}
+
+// 鱼尾粉雪板：宽而翘的圆板头，板尾分成燕尾；板头画成鱼脸（眼睛、腮线），板身一片片鳞，燕尾是鳍条
 const fishBody = () =>
   sample(28, (u) => {
     const t = 1 - (1 - u) ** 1.7;
@@ -303,38 +507,83 @@ const fishBody = () =>
 // 右边那一瓣燕尾：外沿接着板身，内沿斜着收成尖
 const fishTail = () => sample(8, (t) => ({ t, z: 0.4 + 0.36 * t, y: 0.02 + 0.03 * t * t, x: (0.25 + 0.21 * t) / 2, w: 0.25 - 0.25 * t, th: 0.04 }));
 function fish(v, c) {
-  put(v, geo('fish', () => loftGeo(fishBody())), c.main);
-  put(v, geo('fish.edge', () => loftGeo(under(fishBody(), 0.014, 0.012))), c.steel);
-  put(v, geo('fish.line', () => loftGeo(inlay(fishBody(), 0.14, 0, 0.72))), c.trim);
-  put(v, geo('fish.nose', () => loftGeo(inlay(fishBody(), 0.78, 0.72, 0.985))), c.trim);
-  const tail = geo('fish.tail', () => loftGeo(fishTail()));
-  const tip = geo('fish.tip', () => loftGeo(inlay(fishTail(), 0.7, 0.35, 1)));
+  const st = fishBody();
+  const T = c.trimColor;
+  put(v, geo('fish', () => loftGeo(st)), c.main);
+  put(v, geo('fish.edge', () => loftGeo(under(st, 0.014, 0.012))), c.steel);
+  skin(v, 'fish', st, 0.64, (d, W, L) => {
+    scales(d, -0.3, 0.55, 0.3, L, 0.05, T, 0.012, 0.85);
+    rect(d, -0.3, 0.46, 0.6, 0.06, T, 0.9);
+    for (const s of [-1, 1]) {
+      d.beginPath();
+      d.moveTo(s * 0.05, 0.5);
+      d.quadraticCurveTo(s * 0.15, 0.36, s * 0.27, 0.47);
+      d.strokeStyle = css(T);
+      d.lineWidth = 0.018;
+      d.stroke();
+      circle(d, s * 0.15, 0.25, 0.075, INK, 0.9);
+      circle(d, s * 0.15, 0.25, 0.062, WHITE);
+      circle(d, s * 0.158, 0.258, 0.036, INK);
+      circle(d, s * 0.145, 0.24, 0.012, WHITE);
+    }
+    line(d, [[-0.1, 0.06], [0, 0.09], [0.1, 0.06]], INK, 0.012, 0.6);
+  }, BOARD_TEX);
+  const tailSt = fishTail();
+  const tail = geo('fish.tail', () => loftGeo(tailSt));
   for (const s of [-1, 1]) {
     put(v, tail, c.main).scale.x = s;
-    put(v, tip, c.trim).scale.x = s;
-    strapBinding(v, c, s * 0.17, 0.02, c.trim);
+    skin(v, 'fish.tail', tailSt, 0.6, (d, W, L) => {
+      rect(d, -W / 2, 0, W, L, T, 0.85);
+      for (let i = 0; i < 5; i++) line(d, [[0.08 + i * 0.03, 0], [0.12 + i * 0.045, L]], INK, 0.008, 0.4);
+    }, { px: 128, py: 128 }).scale.x = s;
+    boardBinding(v, c, s * 0.17, 0.02, T);
   }
 }
 
-// 悬浮滑板：圆头厚板，板底两台发光的悬浮器，板尾一对小推进器
+// 悬浮滑板：圆头厚板，板底两台发光的悬浮器，板尾一对小推进器。
+// 板面是机甲风的涂装：防滑区的六角格、分件缝、警示斜纹、编号和条形码；板头叠两层装甲片
 const hoverDeck = () =>
   sampleEnds(30, (t) => {
     const a = Math.max(0, 1 - t / 0.12);
     const b = Math.max(0, (t - 0.88) / 0.12);
     return { t, z: 0.74 - 1.52 * t, y: 0.01 + 0.035 * (a * a + b * b), w: 0.56 * Math.sqrt(Math.min(1, Math.sin(Math.PI * t) * 4)), th: 0.06 };
   });
+const HOVER_NOSE = [
+  { z: -0.38, y: 0.048, w: 0.26, th: 0.022 },
+  { z: -0.5, y: 0.05, w: 0.34, th: 0.026 },
+  { z: -0.66, y: 0.058, w: 0.28, th: 0.022 },
+  { z: -0.73, y: 0.064, w: 0.12, th: 0.016 },
+];
 function hover(v, c) {
-  put(v, geo('hover', () => loftGeo(hoverDeck())), c.main);
-  put(v, geo('hover.belly', () => loftGeo(under(hoverDeck(), -0.14, 0.04))), c.dark);
-  put(v, geo('hover.pad', () => loftGeo(inlay(hoverDeck(), 0.62, 0.16, 0.84))), c.rubber);
+  const st = hoverDeck();
+  const T = c.trimColor;
+  put(v, geo('hover', () => loftGeo(st)), c.main);
+  put(v, geo('hover.belly', () => loftGeo(under(st, -0.14, 0.04))), c.dark);
+  skin(v, 'hover', st, 0.58, (d, W, L) => {
+    hexes(d, -0.19, 0.42, 0.19, L - 0.3, 0.03, INK, 0.006, 0.4);
+    line(d, [[-0.2, 0.4], [0.2, 0.4], [0.2, L - 0.3], [-0.2, L - 0.3]], INK, 0.006, 0.55, true);
+    hazard(d, -0.2, L - 0.26, 0.4, 0.05, 0.025);
+    text(d, 'HV-01', 0.08, L - 0.15, 0.05, INK, { a: 0.85, rot: Math.PI });
+    barcode(d, -0.17, L - 0.19, 0.12, 0.07, 12);
+    warn(d, 0.13, 0.34, 0.06, Math.PI);
+    text(d, 'ANTI-GRAV', -0.04, 0.34, 0.03, INK, { a: 0.75, weight: 700, rot: Math.PI });
+    for (const s of [-1, 1]) chevrons(d, s * 0.235, 0.62, 0.03, 0.02, 4, 0.04, T, 0.9);
+  }, BOARD_TEX);
+  // 板头的装甲片：深色一层，上面再压一道发光的折线
+  put(v, geo('hover.nose', () => loftGeo(HOVER_NOSE)), c.deep);
+  skin(v, 'hover.nose', HOVER_NOSE, 0.36, (d, W, L) => {
+    chevrons(d, 0, 0.08, 0.2, 0.05, 2, 0.08, T, 1);
+    line(d, [[-0.15, L - 0.02], [-0.1, 0.1], [0.1, 0.1], [0.15, L - 0.02]], INK, 0.006, 0.5);
+  }, { px: 128, py: 128, glow: true });
   // 板面两侧的灯条
-  const rail = geo('hover.rail', () => loftGeo(hoverDeck().filter((s) => s.t > 0.14 && s.t < 0.86).map((s) => ({ ...s, x: s.w / 2 - 0.035, w: 0.024, th: 0.01, off: s.th / 2 + 0.004 }))));
-  const ring = geo('hover.ring', () => new THREE.TorusGeometry(0.16, 0.022, 8, 28).rotateX(Math.PI / 2));
-  const disc = geo('disc', () => new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2));
+  const rail = geo('hover.rail', () => loftGeo(railOf(st, 0.035, 0.024, 0.14, 0.86)));
+  const ringG = geo('hover.ring', () => new THREE.TorusGeometry(0.16, 0.022, 8, 28).rotateX(HALF_PI));
+  const disc = geo('disc', () => new THREE.CircleGeometry(1, 28).rotateX(-HALF_PI));
   const fin = geo('hover.fin', () => plateGeo([[0, 0], [-0.2, 0], [-0.26, 0.16], [-0.15, 0.16]], 0.014, true));
   for (const z of [-0.44, 0.42]) {
     put(v, PRIM.cyl, c.dark, 0, -0.08, z, 0.2, 0.05, 0.2);
-    put(v, ring, c.lit, 0, -0.105, z);
+    put(v, ringG, c.lit, 0, -0.105, z);
+    put(v, geo('hover.vanes', () => studsGeo([[0.1, 0, 0], [-0.1, 0, 0], [0, 0, 0.1], [0, 0, -0.1]], 0.02, 'y', 0.012)), c.steel, 0, -0.108, z);
     soft(put(v, disc, glowMat(c.trimColor, 0.6), 0, -0.106, z, 0.15));
     // 雪面上被照亮的一圈
     soft(put(v, disc, glowMat(c.trimColor, 0.28), 0, c.ground + 0.012, z, 0.32));
@@ -342,14 +591,18 @@ function hover(v, c) {
   for (const s of [-1, 1]) {
     put(v, rail, c.lit).scale.x = s;
     rod(v, c.steel, 0.04, 0.18, s * 0.15, -0.035, 0.66);
+    rod(v, c.dark, 0.044, 0.025, s * 0.15, -0.035, 0.6);
     flame(v, c.fx, s * 0.15, -0.035, 0.75, 0.035, 0.32);
-    box(v, c.trim, 0.17, 0.05, 0.03, s * 0.17, 0.065, 0.215);
     put(v, fin, c.trim, s * 0.21, 0.04, 0.46);
+    // 侧面的进气口
+    box(v, c.black, 0.012, 0.032, 0.18, s * 0.275, 0.012, -0.05);
+    for (let i = 0; i < 3; i++) box(v, c.lit, 0.004, 0.005, 0.15, s * 0.2815, 0.002 + i * 0.01, -0.05);
+    boardBinding(v, c, s * 0.17, 0.02, T);
   }
-  box(v, c.white, 0.26, 0.014, 0.03, 0, 0.047, -0.56);
+  box(v, c.white, 0.26, 0.014, 0.03, 0, 0.047, -0.585);
 }
 
-// 凤凰翼板：尖喙板头，两侧三层羽翼，板尾一把尾羽
+// 凤凰翼板：尖喙板头，两侧三层羽翼，板尾一把尾羽；板面是一片片往后掠的火羽和金线
 const phoenixDeck = () =>
   sample(30, (u) => {
     const t = 1 - (1 - u) ** 1.5;
@@ -359,254 +612,64 @@ const phoenixDeck = () =>
     return { t, z: 0.7 - 1.7 * t, y: 0.02 + 0.16 * b * b + 0.04 * a * a, w, th: 0.04 };
   });
 function phoenix(v, c) {
-  put(v, geo('phx', () => loftGeo(phoenixDeck())), c.main);
-  put(v, geo('phx.edge', () => loftGeo(under(phoenixDeck(), 0.024, 0.014))), c.trim);
-  put(v, geo('phx.spine', () => loftGeo(inlay(phoenixDeck(), 0.16, 0.04, 0.9))), c.lit);
+  const st = phoenixDeck();
+  const T = c.trimColor;
+  put(v, geo('phx', () => loftGeo(st)), c.main);
+  put(v, geo('phx.edge', () => loftGeo(under(st, 0.024, 0.014))), c.trim);
+  skin(v, 'phoenix', st, 0.6, (d, W, L) => {
+    const plume = (x, y, len, ang, col, a) => {
+      d.save();
+      d.translate(x, y);
+      d.rotate(ang);
+      d.beginPath();
+      d.moveTo(0, 0);
+      d.bezierCurveTo(len * 0.25, len * 0.15, len * 0.2, len * 0.7, 0, len);
+      d.bezierCurveTo(-len * 0.2, len * 0.7, -len * 0.25, len * 0.15, 0, 0);
+      d.fillStyle = css(col, a);
+      d.fill();
+      d.restore();
+    };
+    for (let i = 0; i < 7; i++) {
+      const y = 0.35 + i * 0.16;
+      for (const s of [-1, 1]) {
+        plume(s * 0.05, y, 0.24, s * -0.75, T, 0.85);
+        plume(s * 0.07, y + 0.04, 0.16, s * -0.9, 0xff5a1f, 0.8);
+      }
+    }
+    for (const s of [-1, 1]) line(d, [[s * 0.03, 0.25], [s * 0.2, 0.7], [s * 0.25, 1.2], [s * 0.18, L - 0.1]], 0xfff0a0, 0.008, 0.9);
+    poly(d, [[0, 0.1], [0.05, 0.22], [0, 0.3], [-0.05, 0.22]], 0xff3a1f, 0.9);
+  }, BOARD_TEX);
+  put(v, geo('phx.spine', () => loftGeo(inlay(st, 0.16, 0.04, 0.9))), c.lit);
   // 喙和眼睛
   put(v, PRIM.cone, c.trim, 0, 0.19, -1.04, 0.035, 0.16, 0.03).rotation.x = -1.37;
   for (const s of [-1, 1]) ball(v, c.white, 0.022, 0.022, 0.022, s * 0.05, 0.145, -0.84);
+  // 头顶的冠羽
+  for (const [x, h, r] of [[0, 0.12, -0.5], [-0.035, 0.09, -0.7], [0.035, 0.09, -0.7]]) {
+    const m = put(v, PRIM.cone4, c.lit, x, 0.17, -0.74, 0.016, h, 0.006);
+    m.rotation.x = r;
+  }
   // 一片羽毛：根在原点，往右伸、往后掠
   const feather = geo('phx.feather', () => plateGeo([[0, 0.09], [0.26, 0.1], [0.62, -0.1], [0.72, -0.3], [0.42, -0.2], [0, -0.1]], 0.018, false));
+  const vein = geo('phx.vein', () => plateGeo([[0, 0.02], [0.4, 0.0], [0.66, -0.22], [0.4, -0.04], [0, -0.02]], 0.02, false));
   for (const s of [-1, 1]) {
     const w = new THREE.Group();
     w.position.set(s * 0.27, 0.06, 0.12);
     w.scale.x = s;
     w.rotation.z = s * 0.3;
     put(w, feather, c.trim);
+    put(w, vein, c.lit, 0, 0.002);
     put(w, feather, c.main, 0, -0.014, 0.15, 0.8);
     put(w, feather, c.trim, 0, -0.028, 0.28, 0.62);
     v.add(w);
     c.fx.wings.push({ o: w, s });
     // 尾羽：外侧一对短的，中间一对长的，左右对称地往外掠
     const side = put(v, feather, c.trim, 0, 0.07, 0.6, 0.85, 0.85, -s * 0.85);
-    side.rotation.set(-0.3, -Math.PI / 2 + s * 0.45, 0);
+    side.rotation.set(-0.3, -HALF_PI + s * 0.45, 0);
     const mid = put(v, feather, c.main, 0, 0.078, 0.6, 1.05, 1.05, -s * 1.05);
-    mid.rotation.set(-0.36, -Math.PI / 2 + s * 0.13, 0);
+    mid.rotation.set(-0.36, -HALF_PI + s * 0.13, 0);
     flame(v, c.fx, s * 0.08, 0.03, 0.7, 0.04, 0.38);
-    strapBinding(v, c, s * 0.17, 0.02, c.trim);
+    boardBinding(v, c, s * 0.17, 0.02, T);
   }
-}
-
-// ---------- 坐着滑的载具 ----------
-
-// 托博根长橇：五条木板并排，橇头整个卷起来，用绳子拉住
-const tobSlat = () => {
-  const st = sample(6, (t) => ({ z: 0.78 - 1.58 * t, y: 0.045, w: 0.116, th: 0.028 }));
-  for (let i = 1; i <= 16; i++) {
-    const a = (i / 16) * 3.4;
-    st.push({ z: -0.8 - 0.28 * Math.sin(a), y: 0.325 - 0.28 * Math.cos(a), w: 0.116, th: 0.028 });
-  }
-  return st;
-};
-function toboggan(v, c) {
-  const slat = geo('tob.slat', () => loftGeo(tobSlat()));
-  for (let i = 0; i < 5; i++) put(v, slat, i % 2 ? c.trim : c.main, (i - 2) * 0.128);
-  const wood = c.m(0x7a5230);
-  const cord = c.m(CORD);
-  for (const z of [0.64, 0.22, -0.26, -0.64]) box(v, wood, 0.66, 0.035, 0.06, 0, 0.077, z);
-  box(v, wood, 0.66, 0.04, 0.05, 0, 0.572, -0.8);
-  const rail = geo('tob.rail', () => pipeGeo([[0.335, 0.07, 0.74], [0.335, 0.19, 0.54], [0.335, 0.2, 0.1], [0.335, 0.19, -0.3], [0.335, 0.07, -0.52]], 0.017, 20, 6));
-  for (const s of [-1, 1]) {
-    put(v, rail, wood).scale.x = s;
-    strut(v, cord, [s * 0.31, 0.56, -0.8], [s * 0.31, 0.09, -0.26], 0.011);
-  }
-  // 拉绳搭在橇面上
-  put(v, geo('tob.rope', () => pipeGeo([[-0.31, 0.09, -0.26], [-0.16, 0.105, -0.2], [0, 0.105, -0.16], [0.16, 0.105, -0.2], [0.31, 0.09, -0.26]], 0.013, 20, 6)), cord);
-  box(v, c.m(0xb8323a), 0.5, 0.07, 0.62, 0, 0.095, 0.2);
-}
-
-// 雪地飞碟：一只浅碟，碟沿包边、一圈铆钉，中间是坐垫，两侧有把手，碟沿前面拴着牵引绳
-function saucer(v, c) {
-  const d = new THREE.Group();
-  d.position.z = -0.08;
-  v.add(d);
-  const dish = [[0, 0.02], [0.3, 0.03], [0.55, 0.08], [0.7, 0.16], [0.78, 0.25], [0.8, 0.3], [0.775, 0.325], [0.74, 0.3], [0.68, 0.22], [0.52, 0.135], [0.3, 0.09], [0, 0.08]];
-  put(d, geo('saucer', () => lathe(dish, 40)), c.main);
-  put(d, geo('saucer.rim', () => new THREE.TorusGeometry(0.787, 0.03, 8, 44).rotateX(Math.PI / 2)), c.trim, 0, 0.305, 0);
-  put(d, geo('saucer.band', () => lathe([[0.69, 0.238], [0.6, 0.181], [0.54, 0.149]], 40)), c.trim);
-  put(d, geo('saucer.seat', () => lathe([[0, 0.085], [0.3, 0.085], [0.34, 0.112], [0.3, 0.14], [0, 0.145]], 28)), c.rubber);
-  put(d, geo('saucer.studs', () => ringOf(new THREE.SphereGeometry(0.022, 8, 6), 12, 0.716)), c.steel, 0, 0.27, 0);
-  const handle = geo('saucer.handle', () => new THREE.TorusGeometry(0.09, 0.018, 6, 12, Math.PI).rotateY(Math.PI / 2));
-  for (const s of [-1, 1]) put(d, handle, c.dark, s * 0.62, 0.19, 0);
-  // 牵引绳从碟沿顺着碟面搭下来，把手落在两脚之间
-  put(v, geo('saucer.leash', () => pipeGeo([[0, 0.33, -0.87], [0, 0.225, -0.72], [0, 0.15, -0.56], [0, 0.13, -0.44]], 0.012, 16, 5)), c.m(CORD));
-  strut(v, c.dark, [-0.08, 0.13, -0.43], [0.08, 0.13, -0.43], 0.018);
-}
-
-// 雪地单车：前后两块短雪板，三角车架加整流罩，前叉带避震，弯把、鞍座、脚踏
-function bike(v, c) {
-  const S = [0, 0.5, 0.2]; // 鞍座下
-  const HT = [0, 0.76, -0.5]; // 头管上
-  const HB = [0, 0.6, -0.56]; // 头管下
-  const BB = [0, 0.22, -0.12]; // 车架最低点
-  const RM = [0, 0.1, 0.36]; // 后板的座
-  const rearSki = { tail: 0.8, nose: -0.12, w: 0.17, waist: 0.15, tailKick: 0.02, noseKick: 0.1, noseLen: 0.3, n: 18, y: 0.02 };
-  const frontSki = { tail: -0.42, nose: -1.24, w: 0.17, waist: 0.15, noseKick: 0.15, noseLen: 0.32, n: 18, y: 0.02 };
-  put(v, geo('bike.rear', () => loftGeo(skiStations(rearSki))), c.main);
-  put(v, geo('bike.rear.top', () => loftGeo(inlay(skiStations(rearSki), 0.4, 0.15, 0.8))), c.trim);
-  put(v, geo('bike.front', () => loftGeo(skiStations(frontSki))), c.main);
-  put(v, geo('bike.front.top', () => loftGeo(inlay(skiStations(frontSki), 0.4, 0.15, 0.8))), c.trim);
-  box(v, c.dark, 0.07, 0.08, 0.18, 0, 0.075, 0.36);
-  box(v, c.dark, 0.07, 0.08, 0.16, 0, 0.075, -0.84);
-  // 车架
-  strut(v, c.trim, S, HT, 0.035);
-  strut(v, c.trim, HB, BB, 0.04);
-  strut(v, c.trim, BB, S, 0.033);
-  strut(v, c.trim, BB, RM, 0.028);
-  strut(v, c.trim, S, RM, 0.026);
-  strut(v, c.dark, [0, 0.8, -0.485], [0, 0.56, -0.575], 0.05);
-  put(v, geo('bike.fairing', () => plateGeo([[-0.16, 0.47], [0.47, 0.71], [0.5, 0.6], [0.14, 0.27], [-0.06, 0.3]], 0.075, true)), c.main);
-  // 前叉和避震
-  for (const s of [-1, 1]) strut(v, c.steel, [s * 0.06, 0.62, -0.555], [s * 0.05, 0.1, -0.84], 0.022);
-  strut(v, c.m(0xe0263c), [0, 0.52, -0.61], [0, 0.3, -0.73], 0.04);
-  // 鞍座、后挡泥板、尾灯
-  ball(v, c.rubber, 0.11, 0.05, 0.27, 0, 0.51, 0.2);
-  box(v, c.main, 0.12, 0.02, 0.34, 0, 0.44, 0.52).rotation.x = -0.25;
-  ball(v, c.red, 0.03, 0.03, 0.03, 0, 0.485, 0.69);
-  // 车把
-  strut(v, c.steel, [0, 0.78, -0.49], [0, 0.845, -0.47], 0.028);
-  put(v, geo('bike.bar', () => pipeGeo([[-0.39, 0.8, -0.36], [-0.22, 0.84, -0.44], [0, 0.845, -0.47], [0.22, 0.84, -0.44], [0.39, 0.8, -0.36]], 0.02, 20, 8)), c.steel);
-  for (const s of [-1, 1]) strut(v, c.rubber, [s * 0.4, 0.797, -0.355], [s * 0.3, 0.827, -0.405], 0.03);
-  // 号码牌
-  const plate = new THREE.Group();
-  plate.position.set(0, 0.69, -0.6);
-  plate.rotation.x = 0.2;
-  box(plate, c.m(0xf4f4f4), 0.2, 0.17, 0.02, 0, 0, 0);
-  box(plate, c.trim, 0.11, 0.07, 0.02, 0, 0, -0.004);
-  v.add(plate);
-  // 脚踏
-  strut(v, c.steel, [-0.27, 0.12, -0.29], [0.27, 0.12, -0.29], 0.02);
-  strut(v, c.trim, BB, [0, 0.12, -0.29], 0.024);
-}
-
-// 雪地冲锋艇：一圈 U 形气囊、尖船头，船底两条滑橇，艇尾插一面小旗
-function raft(v, c) {
-  const hull = c.m(HULL);
-  put(v, geo('raft.tube', () => pipeGeo(mirrorX([[-0.47, 0.2, 0.66], [-0.48, 0.2, 0.1], [-0.44, 0.21, -0.5], [-0.25, 0.27, -0.95], [0, 0.33, -1.14]]), 0.17, 56, 12)), c.main);
-  put(v, geo('raft.strake', () => pipeGeo(mirrorX([[-0.63, 0.24, 0.62], [-0.64, 0.24, 0.1], [-0.59, 0.25, -0.53], [-0.34, 0.31, -1.06], [0, 0.37, -1.3]]), 0.03, 56, 6)), c.trim);
-  const rope = [[-0.47, 0.385, 0.6], [-0.48, 0.41, 0.35], [-0.48, 0.385, 0.1], [-0.47, 0.415, -0.2], [-0.44, 0.395, -0.5], [-0.36, 0.44, -0.75], [-0.25, 0.455, -0.95], [0, 0.515, -1.14]];
-  put(v, geo('raft.rope', () => pipeGeo(mirrorX(rope), 0.012, 64, 5)), c.m(CORD));
-  put(v, geo('raft.floor', () => plateGeo([[-0.45, -0.66], [0.45, -0.66], [0.45, 0.5], [0.22, 0.95], [0, 1.1], [-0.22, 0.95], [-0.45, 0.5]], 0.06, false)), hull, 0, 0.07, 0);
-  box(v, hull, 0.62, 0.24, 0.05, 0, 0.2, 0.66);
-  const runner = geo('raft.runner', () => loftGeo(skiStations({ tail: 0.7, nose: -0.95, w: 0.13, waist: 0.12, noseKick: 0.16, noseLen: 0.25, n: 18, y: 0.02 })));
-  for (const s of [-1, 1]) {
-    // 艇尾的锥形气囊头
-    put(v, PRIM.cone, c.trim, s * 0.47, 0.2, 0.79, 0.17, 0.26, 0.17).rotation.x = Math.PI / 2;
-    put(v, runner, c.steel, s * 0.3);
-  }
-  // 坐垫、靠背气囊、船头的挡雪板和提手
-  box(v, c.trim, 0.42, 0.07, 0.42, 0, 0.135, 0.16);
-  strut(v, c.main, [-0.4, 0.27, 0.46], [0.4, 0.27, 0.46], 0.1);
-  put(v, geo('raft.dodger', () => plateGeo([[-0.3, 0.62], [0.3, 0.62], [0, 1.04]], 0.02, false)), c.trim, 0, 0.28, 0).rotation.x = 0.2;
-  put(v, geo('raft.handle', () => new THREE.TorusGeometry(0.07, 0.016, 6, 12, Math.PI)), c.dark, 0, 0.5, -1.13);
-  // 小旗
-  strut(v, c.steel, [0.3, 0.36, 0.64], [0.3, 0.98, 0.7], 0.012);
-  c.fx.flags.push(put(v, geo('raft.flag', () => plateGeo([[0, 0], [0, 0.16], [-0.3, 0.08]], 0.012, true)), c.trim, 0.3, 0.8, 0.69));
-}
-
-// 雪怪摩托：后面一条履带、前面两块转向雪板，流线机罩、风挡、车灯、双排气
-function mobile(v, c) {
-  // 履带和负重轮
-  put(v, geo('mobile.track', () => new THREE.CapsuleGeometry(0.115, 0.72, 4, 12).rotateX(Math.PI / 2)), c.rubber, 0, 0.115, 0.42, 1.45, 1, 1);
-  for (const z of [0.08, 0.42, 0.76]) strut(v, c.steel, [-0.19, 0.085, z], [0.19, 0.085, z], 0.06);
-  box(v, c.main, 0.38, 0.14, 0.9, 0, 0.3, 0.45);
-  // 坐垫和尾箱
-  const seat = [
-    { z: 0.82, y: 0.46, w: 0.3, th: 0.1 },
-    { z: 0.62, y: 0.455, w: 0.34, th: 0.13 },
-    { z: 0.2, y: 0.43, w: 0.34, th: 0.12 },
-    { z: -0.04, y: 0.415, w: 0.24, th: 0.1 },
-  ];
-  put(v, geo('mobile.seat', () => loftGeo(seat)), c.rubber);
-  put(v, geo('mobile.seat.line', () => loftGeo(inlay(seat, 0.2))), c.trim);
-  box(v, c.main, 0.36, 0.17, 0.22, 0, 0.46, 0.86);
-  box(v, c.red, 0.26, 0.05, 0.02, 0, 0.48, 0.975);
-  put(v, geo('mobile.bumper', () => pipeGeo([[-0.2, 0.4, 0.78], [-0.22, 0.45, 1.0], [0, 0.46, 1.07], [0.22, 0.45, 1.0], [0.2, 0.4, 0.78]], 0.02, 20, 6)), c.steel);
-  box(v, c.trim, 0.34, 0.18, 0.02, 0, 0.17, 0.98).rotation.x = -0.3;
-  // 两腿之间的油箱
-  const tank = [
-    { z: -0.02, y: 0.37, w: 0.13, th: 0.26 },
-    { z: -0.3, y: 0.38, w: 0.13, th: 0.3 },
-    { z: -0.58, y: 0.42, w: 0.26, th: 0.36 },
-  ];
-  put(v, geo('mobile.tank', () => loftGeo(tank)), c.main);
-  // 车头：深色底壳托着流线形机罩，机罩一直接到仪表台；中间一道装饰条，顶上两个进气口
-  const pan = [
-    { z: -0.3, y: 0.2, w: 0.42, th: 0.16 },
-    { z: -0.62, y: 0.21, w: 0.68, th: 0.2 },
-    { z: -1.15, y: 0.21, w: 0.68, th: 0.2 },
-    { z: -1.38, y: 0.24, w: 0.42, th: 0.14 },
-    { z: -1.5, y: 0.28, w: 0.2, th: 0.06 },
-  ];
-  put(v, geo('mobile.pan', () => loftGeo(pan)), c.dark);
-  ball(v, c.main, 0.34, 0.24, 0.5, 0, 0.36, -0.92);
-  ball(v, c.trim, 0.085, 0.246, 0.507, 0, 0.36, -0.92);
-  box(v, c.dark, 0.22, 0.05, 0.03, 0, 0.3, -1.405);
-  for (const s of [-1, 1]) box(v, c.dark, 0.06, 0.035, 0.18, s * 0.2, 0.552, -0.86);
-  // 风挡、仪表台、车把
-  const shield = soft(put(v, geo('mobile.shield', () => new THREE.CylinderGeometry(0.27, 0.33, 0.36, 14, 1, true, Math.PI - 1, 2)), c.glass, 0, 0.73, -0.42));
-  shield.rotation.x = 0.3;
-  box(v, c.dark, 0.34, 0.07, 0.14, 0, 0.6, -0.58);
-  strut(v, c.steel, [0, 0.56, -0.6], [0, 0.775, -0.5], 0.025);
-  put(v, geo('mobile.bar', () => pipeGeo([[-0.39, 0.745, -0.385], [-0.22, 0.775, -0.47], [0, 0.78, -0.5], [0.22, 0.775, -0.47], [0.39, 0.745, -0.385]], 0.022, 20, 8)), c.rubber);
-  const ski = geo('mobile.ski', () => loftGeo(skiStations({ tail: -0.62, nose: -1.56, w: 0.14, waist: 0.12, noseKick: 0.16, noseLen: 0.25, n: 18, y: 0.02 })));
-  const loop = geo('mobile.loop', () => new THREE.TorusGeometry(0.06, 0.012, 6, 10, Math.PI).rotateY(Math.PI / 2));
-  for (const s of [-1, 1]) {
-    ball(v, c.white, 0.07, 0.045, 0.035, s * 0.16, 0.42, -1.335);
-    box(v, c.trim, 0.11, 0.08, 0.02, s * 0.36, 0.75, -0.45);
-    // 踏板
-    box(v, c.dark, 0.2, 0.03, 0.64, s * 0.27, 0.095, -0.24);
-    box(v, c.dark, 0.2, 0.1, 0.03, s * 0.27, 0.15, -0.55).rotation.x = -0.4;
-    // 前悬挂：雪板、立柱、上下摆臂、避震
-    put(v, ski, c.trim, s * 0.42);
-    put(v, loop, c.steel, s * 0.42, 0.09, -1.47);
-    strut(v, c.steel, [s * 0.42, 0.03, -1.02], [s * 0.42, 0.27, -1.0], 0.025);
-    strut(v, c.steel, [s * 0.3, 0.19, -1.0], [s * 0.42, 0.14, -1.02], 0.02);
-    strut(v, c.steel, [s * 0.28, 0.32, -0.98], [s * 0.42, 0.26, -1.0], 0.018);
-    strut(v, c.m(0xffd23c), [s * 0.2, 0.48, -0.92], [s * 0.4, 0.17, -1.0], 0.035);
-    // 排气管
-    rod(v, c.steel, 0.04, 0.32, s * 0.235, 0.3, 0.78);
-    flame(v, c.fx, s * 0.235, 0.3, 0.95, 0.035, 0.36);
-  }
-}
-
-// 星环飞碟：离地悬浮的碟身，碟沿一圈光环，底下一圈会转的灯，后面两片尾翼
-function ufo(v, c) {
-  const u = new THREE.Group();
-  u.position.z = 0.05;
-  v.add(u);
-  const hull = [[0, 0.18], [0.35, 0.19], [0.68, 0.26], [0.9, 0.33], [0.98, 0.375], [0.95, 0.4], [0.72, 0.41], [0.46, 0.43], [0.4, 0.43], [0.36, 0.41], [0.3, 0.4], [0, 0.4]];
-  put(u, geo('ufo', () => lathe(hull, 44)), c.main);
-  put(u, geo('ufo.rim', () => new THREE.TorusGeometry(0.97, 0.035, 8, 48).rotateX(Math.PI / 2)), c.lit, 0, 0.378, 0);
-  put(u, geo('ufo.band', () => lathe([[0.7, 0.4155], [0.55, 0.427]], 44)), c.trim);
-  put(u, geo('ufo.belly', () => lathe([[0, 0.07], [0.2, 0.09], [0.36, 0.15], [0.45, 0.215]], 32)), c.m(0x4a5263));
-  ball(u, c.lit, 0.15, 0.045, 0.15, 0, 0.075, 0);
-  // 碟底的灯圈：两种颜色交替，整圈慢慢转
-  const lights = new THREE.Group();
-  lights.userData.spin = 1.4;
-  put(lights, geo('ufo.lamp0', () => ringOf(new THREE.SphereGeometry(0.045, 8, 6), 6, 0.84)), c.lit, 0, 0.305, 0);
-  put(lights, geo('ufo.lamp1', () => ringOf(new THREE.SphereGeometry(0.045, 8, 6), 6, 0.84, Math.PI / 6)), c.white, 0, 0.305, 0);
-  u.add(lights);
-  c.fx.spin.push(lights);
-  // 座舱：一圈软包、靠背、前面的风挡和操纵杆
-  put(u, geo('ufo.coaming', () => new THREE.TorusGeometry(0.4, 0.028, 8, 32).rotateX(Math.PI / 2)), c.rubber, 0, 0.435, 0);
-  put(u, geo('ufo.back', () => new THREE.TorusGeometry(0.37, 0.055, 8, 16, Math.PI * 0.9).rotateZ(Math.PI * 0.05).rotateX(Math.PI / 2)), c.trim, 0, 0.53, 0);
-  soft(put(u, geo('ufo.shield', () => new THREE.CylinderGeometry(0.7, 0.76, 0.16, 20, 1, true, Math.PI - 0.8, 1.6)), c.glass, 0, 0.49, 0));
-  strut(u, c.steel, [0, 0.4, -0.32], [0, 0.62, -0.36], 0.016);
-  ball(u, c.lit, 0.035, 0.035, 0.035, 0, 0.64, -0.36);
-  // 尾翼、天线、推进器
-  const fin = geo('ufo.fin', () => plateGeo([[0, 0], [-0.3, 0], [-0.42, 0.3], [-0.3, 0.3]], 0.03, true));
-  for (const s of [-1, 1]) {
-    put(u, fin, c.trim, s * 0.5, 0.4, 0.3).rotation.z = -s * 0.35;
-    rod(u, c.steel, 0.05, 0.2, s * 0.22, 0.33, 0.9);
-    flame(u, c.fx, s * 0.22, 0.33, 1.0, 0.04, 0.35);
-  }
-  strut(u, c.steel, [0, 0.42, 0.66], [0, 0.86, 0.74], 0.012);
-  ball(u, c.lit, 0.04, 0.04, 0.04, 0, 0.88, 0.745);
-  // 照在雪面上的光
-  const disc = geo('disc', () => new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2));
-  soft(put(u, disc, glowMat(c.trimColor, 0.26), 0, 0.012, 0, 0.6));
-  soft(put(u, disc, glowMat(c.trimColor, 0.3), 0, 0.014, 0, 0.26));
 }
 
 // 每种模型的造型函数和站姿参数（gear.js 里用 model 字段指过来）。
@@ -614,16 +677,19 @@ function ufo(v, c) {
 // sitDrop：坐下后整个人下沉多少（= 0.62 - 坐面离地高度）；legBase：腿往前抬的角度。
 // grip：握车把时手臂抬起的角度；lift：悬浮离地多高；bob：悬浮时上下起伏的幅度。
 export const GEAR_MODELS = {
+  ski: { ski: classic },
+  race: { ski: race },
+  carbon: { ski: carbon },
+  aurora: { ski: aurora },
   blades: { ski: blades, poles: false, armSpread: 0.35 },
   twin: { ski: twin },
   mech: { ski: mech },
+  learner: { build: learner },
+  board: { build: allMountain },
+  park: { build: park },
+  storm: { build: storm },
   fish: { build: fish },
   hover: { build: hover, lift: 0.13, bob: 0.022 },
   phoenix: { build: phoenix },
-  toboggan: { build: toboggan, sitDrop: 0.49, legBase: 1.5 },
-  saucer: { build: saucer, sitDrop: 0.48, legBase: 1.55 },
-  bike: { build: bike, sitDrop: 0.06, legBase: 0.6, grip: 0.28 },
-  raft: { build: raft, sitDrop: 0.45, legBase: 1.5 },
-  mobile: { build: mobile, sitDrop: 0.14, legBase: 0.75, grip: 0.34 },
-  ufo: { build: ufo, sitDrop: 0.21, legBase: 1.6, bob: 0.025 },
+  ...RIDES,
 };
