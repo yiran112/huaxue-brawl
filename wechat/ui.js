@@ -7,7 +7,7 @@ import { drawMenu, drawMatch, drawAccount, drawResults } from './pages.js';
 import { drawRace, drawPause, drawReplay } from './race-ui.js';
 import { ModelPreviews } from './model-previews.js';
 import { screenQuad } from './display.js';
-import { gameIconImage, iconRuns, iconToken, rarityLetter } from '../src/icon-art.js';
+import { fallbackIconGlyph, gameIconImage, iconRuns, iconToken, rarityLetter } from '../src/icon-art.js';
 
 const COLORS = {
   panel: 'rgba(11,21,48,.88)',
@@ -37,6 +37,7 @@ export class MiniUI {
     this.beepT = 0;
     this.canvas = wx.createCanvas();
     this.ctx = this.canvas.getContext('2d');
+    this.undrawableIcons = new Set();
     this.redrawIcons = () => this.invalidate();
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.generateMipmaps = false;
@@ -166,8 +167,30 @@ export class MiniUI {
   }
 
   icon(id, x, y, width, height = width) {
-    const image = gameIconImage(id, this.redrawIcons);
-    if (image) this.ctx.drawImage(image, x, y, width, height);
+    const c = this.ctx;
+    if (!this.undrawableIcons.has(id)) {
+      const image = gameIconImage(id, this.redrawIcons);
+      if (image) {
+        try {
+          c.drawImage(image, x, y, width, height);
+          return;
+        } catch {
+          this.undrawableIcons.add(id);
+        }
+      }
+    }
+    const glyph = fallbackIconGlyph(id);
+    if (!glyph) return;
+    c.save();
+    c.font = this.font(Math.min(width, height) * .8, true);
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = '#fff';
+    c.strokeStyle = '#0b1530';
+    c.lineWidth = 2;
+    c.strokeText(glyph, x + width / 2, y + height / 2, width);
+    c.fillText(glyph, x + width / 2, y + height / 2, width);
+    c.restore();
   }
 
   text(value, x, y, { size = 17, color = '#fff', bold = false, italic = false, center = false, right = false, max = this.r - this.l, outline = false } = {}) {
@@ -208,7 +231,12 @@ export class MiniUI {
     this.ctx.font = this.font(size, bold);
     const rows = [[]];
     const runs = iconRuns(value);
-    const glyphs = runs ? runs.flatMap((run) => typeof run === 'string' ? [...run] : [run]) : String(value);
+    const glyphs = [];
+    for (const run of runs || [String(value)]) {
+      if (typeof run === 'string') {
+        for (const char of run) glyphs.push(char);
+      } else glyphs.push(run);
+    }
     for (const char of glyphs) {
       const i = rows.length - 1;
       const row = [...rows[i], char];
