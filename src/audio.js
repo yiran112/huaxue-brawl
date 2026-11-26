@@ -11,8 +11,8 @@ const SAMPLE_URLS = import.meta.glob('./sfx/*.mp3', { eager: true, query: '?url'
 // 赛道配乐及 ui*.mp3 使用 m-a-p 的 YuE2-3B 离线生成：https://huggingface.co/m-a-p/YuE2-3B
 const TRACK_MUSIC = import.meta.glob('./music/tracks/*.mp3', { eager: true, query: '?url', import: 'default' });
 const UI_TONES = {
-  click: [760, 560, 0.055],
-  select: [520, 820, 0.085],
+  click: [380, 245, 0.042],
+  select: [480, 325, 0.052],
   confirm: [540, 1080, 0.13],
   back: [620, 350, 0.09],
   blocked: [255, 165, 0.12],
@@ -429,10 +429,11 @@ export class Sfx {
   uiSound(kind) {
     if (!this.ctx || this.muted) return;
     const name = `ui${kind}`;
+    const soft = kind === 'click' || kind === 'select';
     if (this.samples[name]?.some(Boolean)) {
-      this.sample(name, 0.62, { gap: 0.04, group: 'ui' });
+      this.sample(name, soft ? 0.48 : 0.62, { gap: 0.04, group: 'ui' });
     } else {
-      this.tone('triangle', ...UI_TONES[kind], 0.12);
+      this.tone(soft ? 'sine' : 'triangle', ...UI_TONES[kind], soft ? 0.07 : 0.12);
     }
   }
 

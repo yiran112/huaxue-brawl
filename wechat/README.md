@@ -18,6 +18,8 @@ $env:WECHAT_API_ORIGIN = 'https://snow.example.com'
 npm run build:wechat
 ```
 
+准备单独的联机包时，可以在构建前设置 `$env:WECHAT_OUT_DIR = 'dist-wechat-online'`。微信开发者工具可单独导入这个目录，等 HTTPS、WSS 和合法域名全部可用后再做体验版真机联调。
+
 配置服务后，小游戏显示匹配、好友房和排位入口，好友房可通过微信分享。个人面板可开通同一后端的游客云存档。网页的用户名和密码登录、网页存档迁移、微信账号登录尚未接入。
 
 ## 构建结构

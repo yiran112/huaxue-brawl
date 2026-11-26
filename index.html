@@ -916,82 +916,7 @@
   #matchList .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ---------- 结算 / 暂停 ---------- */
-  #results, #pause { align-items: center; justify-content: center; background: rgba(11, 21, 48, .45); }
-  #resBox { width: min(960px, 96vw); max-height: 94vh; overflow-y: auto; padding: 22px 26px; }
-  #resBody { display: flex; gap: 18px; align-items: flex-start; }
-  #resList { flex: 1; min-width: 0; }
-  #resReward { width: 360px; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, .06); font-size: 13px; font-weight: 700; }
-  #resReward .rl { display: flex; gap: 6px; padding: 3px 0; border-bottom: 1px solid rgba(255, 255, 255, .06); }
-  #resReward .rl > span:first-child { flex: 1; }
-  #resReward .rx { width: 48px; text-align: right; color: #8dff6a; }
-  #resReward .rc { width: 62px; text-align: right; color: #9fe4ff; }
-  #resReward .rp { width: 50px; text-align: right; color: #c9a8ff; }
-  #resReward .rl.head { font-size: 12px; opacity: .7; }
-  #resReward .rl.head .rx, #resReward .rl.head .rc, #resReward .rl.head .rp { color: #fff; }
-  #resReward .rl.note { font-size: 11px; opacity: .6; }
-  #resReward .rl.gold > span:first-child { color: #ffd23c; }
-  #resReward .rl.good > span:first-child { color: #8dff6a; }
-  #resReward .rl.total { font-size: 16px; font-weight: 900; border-bottom: 0; padding-top: 6px; }
-  #resReward .rl.unl { display: block; border: 0; line-height: 1.5; }
-  #resReward .rlv { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 14px; }
-  #resReward .rlv b { color: #ffd23c; }
-  #resReward .rlv .xpbar { flex: 1; }
-  #resBox h2 { margin: 0 0 4px; font-size: 44px; font-style: italic; color: #ffd23c; }
-  #resSub { font-size: 16px; font-weight: 700; margin-bottom: 14px; opacity: .9; }
-  #resList .row { display: flex; align-items: center; gap: 10px; padding: 6px 12px; margin-bottom: 4px; border-radius: 10px;
-    background: rgba(255, 255, 255, .08); font-size: 16px; font-weight: 700; }
-  #resList .row.me { background: #ffd23c; color: #0b1530; }
-  #resList .n { width: 30px; font-size: 22px; font-weight: 900; font-style: italic; }
-  #resList .nm { flex: 1; }
-  #resList .tm { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
-  #resList .pt { width: 120px; text-align: right; }
-  /* 领奖台：白卡站在名次台子上，第一名的台子最高；卡片依次弹出来 */
-  .rpod { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 10px; margin-bottom: 10px; }
-  .rpc { --tc: transparent; --bc: #c9d3e3; --bd: #7d8aa3; position: relative; display: flex; flex-direction: column; align-items: center; min-width: 0;
-    padding: 12px 8px 0; overflow: hidden; color: #1d2540; text-align: center; border-radius: 14px;
-    background: linear-gradient(165deg, #fff 45%, #e6ecfa); box-shadow: inset 0 4px 0 var(--tc), 0 4px 0 rgba(4, 10, 36, .45);
-    animation: rpIn .45s cubic-bezier(.2, .9, .3, 1.3) both; }
-  .rpc.p1 { --bc: #ffd23c; --bd: #e08a00; animation-delay: .35s; }
-  .rpc.p2 { animation-delay: .2s; }
-  .rpc.p3 { --bc: #e8a46a; --bd: #a95f27; animation-delay: .1s; }
-  .rpc.me { box-shadow: inset 0 4px 0 var(--tc), 0 0 0 3px #ffd23c, 0 0 18px rgba(255, 210, 60, .6); }
-  .rmed { position: absolute; top: 6px; left: 8px; font-size: 26px; line-height: 1; }
-  .rme { position: absolute; top: 8px; right: 8px; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-style: normal; font-weight: 900; color: #ffd23c; background: #1d2540; }
-  .rpc > b { max-width: 100%; margin-top: 4px; font-size: 16px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .rpc > small { font-size: 13px; font-weight: 800; color: #56607a; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .rpaw { display: flex; gap: 2px; margin-top: 2px; font-size: 18px; line-height: 1.2; }
-  .rbase { align-self: stretch; height: 30px; margin: 8px -8px 0; display: grid; place-items: center; font-size: 22px; font-style: italic; font-weight: 900; color: #fff;
-    text-shadow: 0 2px 0 rgba(0, 0, 0, .25); background: linear-gradient(180deg, var(--bc), var(--bd)); }
-  .rpc.p1 .rbase { height: 58px; font-size: 32px; }
-  .rpc.p2 .rbase { height: 42px; }
-  /* 3D 角色：画布占满卡片宽度，冠军那张高一点（要留出蹦起来的空间） */
-  .rav3d { display: block; width: calc(100% + 16px); height: 150px; margin: -4px -8px 0; }
-  .rpc.p1 .rav3d { height: 180px; }
-  /* 开不了 3D 画布时的小人头像：毛线帽、脸、带条纹的上衣，颜色跟选手的造型走 */
-  .rav { position: relative; width: 64px; height: 76px; }
-  .rpc.p1 .rav { transform: scale(1.15); transform-origin: 50% 100%; margin-top: 8px; }
-  .rav i { position: absolute; left: 50%; transform: translateX(-50%); }
-  .rav .body { bottom: 0; width: 52px; height: 28px; border-radius: 22px 22px 6px 6px;
-    background: linear-gradient(180deg, var(--c1) 0 52%, var(--c2) 52% 68%, var(--c1) 68%); box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .15); }
-  .rav .head { bottom: 22px; width: 34px; height: 34px; border-radius: 50%;
-    background: radial-gradient(circle at 35% 58%, #1d2540 0 2.5px, transparent 3px), radial-gradient(circle at 65% 58%, #1d2540 0 2.5px, transparent 3px),
-      radial-gradient(ellipse at 50% 80%, rgba(255, 120, 120, .35) 0 30%, transparent 32%), var(--sk); box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .1); }
-  .rav .hat { bottom: 47px; width: 38px; height: 21px; border-radius: 19px 19px 4px 4px; background: var(--hc); box-shadow: inset 0 -4px 0 rgba(255, 255, 255, .35); }
-  .rav .hat::after { content: ''; position: absolute; left: 50%; top: -6px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--hc);
-    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .4); }
-  /* 本局之最：一排小徽章，自己拿到的是黄底 */
-  .rawards { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
-  .rawards > small { margin-right: 4px; padding: 3px 10px; font-size: 13px; font-weight: 900; font-style: italic; color: #0b1530; background: #ffd23c;
-    clip-path: polygon(0 0, 100% 0, calc(100% - 7px) 100%, 0 100%); }
-  .rawd { display: grid; grid-template-columns: auto auto auto; grid-template-rows: auto auto; column-gap: 6px; align-items: center; padding: 4px 12px 4px 8px; border-radius: 10px;
-    background: rgba(255, 255, 255, .1); animation: rpIn .4s .55s both; }
-  .rawd span { grid-row: span 2; font-size: 22px; }
-  .rawd b { font-size: 13px; font-weight: 900; color: #ffd23c; }
-  .rawd i { grid-column: 2; font-size: 12px; font-style: normal; font-weight: 800; max-width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .rawd em { grid-column: 3; grid-row: 1 / span 2; margin-left: 4px; font-size: 12px; font-style: normal; font-weight: 800; opacity: .75; }
-  .rawd.me { color: #0b1530; background: #ffd23c; }
-  .rawd.me b { color: #b5173f; }
-  @keyframes rpIn { from { opacity: 0; transform: translateY(18px) scale(.85); } }
+  #pause { align-items: center; justify-content: center; background: rgba(11, 21, 48, .45); }
   .btnRow { display: flex; gap: 12px; margin-top: 18px; }
   .btnRow .btn { flex: 1; }
   #pauseBox { width: 360px; padding: 26px; text-align: center; }
@@ -1090,16 +1015,43 @@
 </div>
 
 <div id="results" class="overlay hidden">
-  <div id="resBox" class="panel">
-    <h2 id="resTitle" class="stroke">比赛结束</h2>
-    <div id="resSub"></div>
-    <div id="resBody"><div id="resList"></div><div id="resReward" class="hidden"></div></div>
-    <div class="btnRow">
-      <button class="btn" id="btnLobby">返回大厅</button>
-      <button class="btn hidden" id="btnReplay">精彩回放</button>
-      <button class="btn hidden" id="btnPracticeSwap"></button>
-      <button class="btn go" id="btnNext" style="font-size:22px;padding:12px">再来一局 ▶</button>
+  <div id="resBox">
+    <header class="res-header">
+      <div class="res-ribbon"><h2 id="resTitle">比赛结束</h2></div>
+    </header>
+    <div class="res-scroll">
+      <div id="resBody">
+        <section id="resRanking" aria-labelledby="resRankTitle">
+          <h3 id="resRankTitle">比赛排名</h3>
+          <div id="resList"></div>
+          <div id="resAwards" class="hidden"></div>
+        </section>
+        <section id="resStage" class="hidden" aria-labelledby="resStageTitle">
+          <h3 id="resStageTitle">领奖台</h3>
+          <div class="res-backdrop" aria-hidden="true">
+            <span>雪山大乱斗　雪山大乱斗　雪山大乱斗　雪山大乱斗</span>
+            <span>雪山大乱斗　雪山大乱斗　雪山大乱斗　雪山大乱斗</span>
+            <span>雪山大乱斗　雪山大乱斗　雪山大乱斗　雪山大乱斗</span>
+            <span>雪山大乱斗　雪山大乱斗　雪山大乱斗　雪山大乱斗</span>
+            <span>雪山大乱斗　雪山大乱斗　雪山大乱斗　雪山大乱斗</span>
+          </div>
+          <div id="resPodium"></div>
+          <div class="res-confetti" aria-hidden="true"></div>
+        </section>
+      </div>
     </div>
+    <footer class="res-foot">
+      <details id="resRewards" class="hidden">
+        <summary><span class="res-gain-label">本局收获</span><span id="resRewardTotal"></span><span class="res-more">明细</span></summary>
+        <div id="resReward"></div>
+      </details>
+      <div class="btnRow">
+        <button class="btn" id="btnLobby">返回大厅</button>
+        <button class="btn hidden" id="btnReplay">精彩回放</button>
+        <button class="btn hidden" id="btnPracticeSwap"></button>
+        <button class="btn go" id="btnNext">再来一局 ▶</button>
+      </div>
+    </footer>
   </div>
 </div>
 

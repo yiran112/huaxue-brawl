@@ -69,7 +69,7 @@ const BOT_START = [0.25, 0.45, 0.7]; // 机器人起步喷的概率（按难度�
 const FINISH_SLOW = 1.4; // 单机冲线后慢镜头持续几秒（真实时间）
 
 export class Game {
-  constructor({ Account, UI, RaceHud, Touch, mini = null }) {
+  constructor({ Account, UI, RaceHud, Touch, mini = null, preview = false }) {
     this.mini = mini;
     this.profile = new Profile();
     this.account = new Account(this);
@@ -162,10 +162,14 @@ export class Game {
     this.themeKey = this.resolveTheme();
     this.buildWorld();
     this.toMenu();
-    this.account.boot().then(() => {
-      this.resumeSeat();
-      this.joinInvite();
-    });
+    if (preview) {
+      this.account.hide();
+    } else {
+      this.account.boot().then(() => {
+        this.resumeSeat();
+        this.joinInvite();
+      });
+    }
     if (!mini) this.bindInput();
     this.clock = new THREE.Clock();
     this.frameAt = 0;
@@ -1598,7 +1602,7 @@ export class Game {
   // 联机结算：自己冲线后就显示，其他人陆续冲线时名单跟着刷新
   showNetResults() {
     const p = this.player;
-    const rows = this.order.map((r, i) => ({ rank: i + 1, name: r.name, me: r.isPlayer, idx: r.idx, look: r.look, time: r.finished ? fmtTime(r.finishTime) : '比赛中…' }));
+    const rows = this.order.map((r, i) => ({ rank: i + 1, name: r.name, me: r.isPlayer, idx: r.idx, look: r.look, team: r.team, time: r.finished ? fmtTime(r.finishTime) : '比赛中…' }));
     const racing = this.racers.some((r) => !r.finished);
     // 奖励只结算一次（名单还会刷新好几回）
     if (!this.rewarded) {
@@ -1757,7 +1761,8 @@ export class Game {
       this.ui.refreshProfile();
     }
     const awards = mode.key === 'tt' || last ? null : this.resultAwards(true);
-    this.ui.showResults({ title, sub, rows, nextLabel, reward, backLabel: '返回大厅', awards });
+    const pointsLabel = mode.key === 'team' && !pointsMode ? '队伍' : undefined;
+    this.ui.showResults({ title, sub, rows, nextLabel, reward, backLabel: '返回大厅', awards, pointsLabel });
   }
 
   // ---------- 回调 ----------

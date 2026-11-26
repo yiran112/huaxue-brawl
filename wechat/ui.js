@@ -3,7 +3,8 @@ import { fetchLeaderboard } from '../src/account.js';
 import { seasonNow } from '../src/profile.js';
 import { SHOP_GEAR } from '../src/gear.js';
 import { previewWardrobe, wardrobeState } from '../src/ui/appearance.js';
-import { drawMenu, drawMatch, drawAccount, drawResults } from './pages.js';
+import { drawMenu, drawMatch, drawAccount } from './pages.js';
+import { drawResults, RESULT_MOTION_MS } from './results-ui.js';
 import { drawRace, drawPause, drawReplay } from './race-ui.js';
 import { ModelPreviews } from './model-previews.js';
 import { screenQuad } from './display.js';
@@ -84,7 +85,8 @@ export class MiniUI {
       this.replayButton = replayButton;
       this.invalidate();
     }
-    const liveHud = this.hudVisible && !this.results && !replaying && (!g.paused || g.net.active);
+    const liveHud = this.hudVisible && !this.results && !replaying && (!g.paused || g.net.active) ||
+      !!this.results && !replaying && Date.now() - this.resultsAt < RESULT_MOTION_MS;
     if (!this.dirty && !liveHud && !this.notice) {
       this.renderOverlay();
       return;
@@ -435,6 +437,9 @@ export class MiniUI {
     if (!this.results) {
       this.game.touch.release();
       this.offsets.delete('results');
+      this.offsets.delete('results-detail');
+      this.resultsDetail = false;
+      this.resultsAt = Date.now();
     }
     this.results = data;
     this.pause = null;

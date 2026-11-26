@@ -1,0 +1,573 @@
+/* ---------- 结算：全屏铺开，左边名次榜单，右边领奖台，底栏本局收获和按钮 ---------- */
+#results {
+  padding: max(12px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  background:
+    linear-gradient(0deg, #050c1fd9, transparent 26%),
+    linear-gradient(90deg, #050c1ff0 0%, #071430d0 36%, #0a1a3a8c 68%, #0a1a3a66 100%);
+}
+@supports (backdrop-filter: blur(2px)) {
+  #results { backdrop-filter: blur(3px); }
+}
+
+#resBox {
+  --res-gold: #ffd23c;
+  --res-navy: #0b1530;
+  --res-pale: #d6e6ff;
+  --res-stroke: -2px -2px 0 #0b1530, 2px -2px 0 #0b1530, -2px 2px 0 #0b1530, 2px 2px 0 #0b1530;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.8vh, 18px);
+  width: min(100%, 1400px);
+  height: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  color: #fff;
+}
+#resBox h3 { margin: 0; }
+#resRankTitle, #resStageTitle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- 顶部标题条 ---------- */
+.res-header {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: clamp(4px, 1vh, 9px);
+  min-width: 0;
+  max-width: 100%;
+}
+.res-ribbon {
+  position: relative;
+  overflow: hidden;
+  max-width: calc(100% - 20px);
+  margin-left: 10px;
+  padding: clamp(3px, .8vh, 7px) clamp(52px, 6vw, 92px) clamp(4px, .9vh, 8px) clamp(16px, 2vw, 28px);
+  border: 3px solid #ffffffe6;
+  border-radius: 12px;
+  background: linear-gradient(100deg, #ff9960, #ff3d6e);
+  box-shadow: 0 5px 0 #0b1530b3, 0 16px 34px #0008;
+  transform: skewX(-12deg);
+}
+.res-ribbon::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: clamp(44px, 5vw, 80px);
+  background: repeating-linear-gradient(90deg, #ffffff70 0 6px, transparent 6px 13px);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 75%);
+  mask-image: linear-gradient(90deg, transparent, #000 75%);
+}
+#results.tone-win .res-ribbon { background: linear-gradient(100deg, #fff27e, #ffc21f 55%, #ff9a1a); }
+#results.tone-lose .res-ribbon { background: linear-gradient(100deg, #8090bb, #45517d); }
+#resTitle {
+  margin: 0;
+  overflow: hidden;
+  transform: skewX(12deg);
+  color: #fff;
+  font-size: clamp(26px, 6.6vh, 58px);
+  font-style: italic;
+  font-weight: 900;
+  line-height: 1.16;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-shadow: var(--res-stroke), 0 4px 0 #0b1530;
+}
+
+/* ---------- 中间：榜单 + 领奖台 ---------- */
+.res-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #416783 transparent;
+}
+#resBody {
+  display: grid;
+  grid-template-columns: minmax(0, 640px);
+  gap: clamp(12px, 2vw, 28px);
+  height: 100%;
+}
+#results.has-podium #resBody { grid-template-columns: minmax(300px, 4fr) minmax(0, 6fr); }
+#resRanking {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.6vh, 14px);
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overflow-anchor: none;
+  scrollbar-width: thin;
+  scrollbar-color: #416783 transparent;
+}
+
+.rr-list {
+  display: grid;
+  column-gap: clamp(8px, 1vw, 14px);
+  row-gap: clamp(3px, .75vh, 7px);
+  margin: 0;
+  padding: 0 10px 2px;
+  list-style: none;
+  font-size: clamp(13px, 2.3vh, 19px);
+  font-weight: 800;
+}
+.rr-list > li {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+.rr-head {
+  padding: 0 14px 0 6px;
+  color: #9fb4d8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+.rr-row { min-height: clamp(27px, 5.5vh, 48px); padding: 0 16px 0 6px; }
+.rr-row::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border: 1px solid #ffffff1c;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #13234cf0, #0d1a3bc4);
+  transform: skewX(-10deg);
+}
+.rr-row.team::after {
+  content: '';
+  position: absolute;
+  inset: 5px auto 5px 3px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--team);
+  transform: skewX(-10deg);
+}
+.rr-rank { min-width: 1.7em; text-align: center; white-space: nowrap; }
+.rr-row .rr-rank {
+  color: #c4d2ee;
+  font-size: 1.5em;
+  font-style: italic;
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 0 2px 0 #0b1530;
+}
+#results .rp1 { --place: #ffd23c; --place-dark: #c46a12; --place-light: #fff6b8; }
+#results .rp2 { --place: #dbe8f6; --place-dark: #6683a0; --place-light: #ffffff; }
+#results .rp3 { --place: #f2a46e; --place-dark: #94492c; --place-light: #ffdcbf; }
+.rr-row:is(.rp1, .rp2, .rp3) .rr-rank { color: var(--place); text-shadow: var(--res-stroke), 0 3px 0 #0b1530; }
+.rr-row .rr-rank .game-icon { width: .8em; height: .8em; }
+.rr-face {
+  width: 1.8em;
+  height: 1.8em;
+  border: 2px solid #ffffffd9;
+  border-radius: 50%;
+  background: #ffffff1f;
+  box-shadow: 0 2px 0 #0b153080;
+}
+.rr-face[style] {
+  background:
+    radial-gradient(ellipse 34% 20% at 50% 24%, var(--hc) 96%, transparent 100%),
+    radial-gradient(circle at 50% 47%, var(--sk) 0 26%, transparent 27.5%),
+    linear-gradient(#c6e6ff 0 64%, var(--c1) 64% 82%, var(--c2) 82%);
+}
+.rr-player { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.rr-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rr-stat { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rr-row .rr-pts { color: #9fe4ff; }
+.rr-row.me { color: var(--res-navy); }
+.rr-row.me::before {
+  border: 2px solid #fff;
+  background: linear-gradient(90deg, #fff27e, #ffc21f);
+  box-shadow: 0 4px 0 #0b153099, 0 6px 22px #ffc21f59;
+}
+.rr-row.me .rr-rank { color: var(--res-navy); text-shadow: none; }
+.rr-row.me .rr-pts { color: #6a3a00; }
+.res-you {
+  flex: none;
+  display: inline-block;
+  padding: 1px 6px 2px;
+  border-radius: 5px;
+  color: #08253a;
+  background: #8bdfff;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.25;
+}
+.rr-row.me .res-you { color: var(--res-gold); background: var(--res-navy); }
+
+#resAwards { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 12px 4px; }
+#resAwards > h3 { margin-right: 2px; color: var(--res-gold); font-size: 12px; font-weight: 900; letter-spacing: .1em; }
+.res-award {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 7px;
+  padding: 4px 12px 4px 8px;
+  border: 1px solid #ffffff22;
+  border-radius: 8px;
+  color: #e4efff;
+  background: #0d1a3be6;
+  transform: skewX(-10deg);
+}
+.res-award > * { transform: skewX(10deg); }
+.res-award > span { grid-row: span 2; font-size: 21px; line-height: 1; }
+.res-award b { font-size: 12px; color: var(--res-gold); }
+.res-award small { max-width: 175px; overflow: hidden; color: #bfdaec; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.res-award.me { border-color: #ffd23c99; background: #2a2a4ae6; }
+
+/* ---------- 领奖台：浅色舞台、水印、彩纸，三个人站成一排，脚下名次牌，底下深色名牌带 ---------- */
+#resStage {
+  --plate: clamp(42px, 13.5cqh, 80px);
+  position: relative;
+  container-type: size;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 3px solid #ffffffe6;
+  border-radius: 18px;
+  background: radial-gradient(ellipse 75% 65% at 50% 40%, #fff, #e4f0fa 55%, #bcd5ec);
+  box-shadow: 0 7px 0 #0b1530b3, 0 26px 60px #000a;
+}
+.res-backdrop {
+  position: absolute;
+  z-index: -1;
+  inset: -30% -25%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+  color: #2b5d8a17;
+  font-size: clamp(34px, 8.5vh, 84px);
+  font-style: italic;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: rotate(-9deg);
+}
+.res-backdrop span:nth-child(even) { margin-left: -2.6em; }
+#resPodium {
+  position: relative;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1.16fr 1fr;
+  align-items: end;
+  padding: 0 clamp(6px, 2.4vw, 40px);
+}
+#resPodium::before {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: var(--plate);
+  border-top: 4px solid #33d1e6;
+  background: linear-gradient(#1c2a52, #0b1530);
+  box-shadow: inset 0 -4px #ffc21f;
+}
+.res-podium-place {
+  --badge: clamp(18px, 7.4cqh, 46px);
+  --model-height: calc((100cqh - var(--plate) - var(--badge) * .5 - 34px) * .86);
+  --delay: .3s;
+  position: relative;
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+}
+.res-podium-place.rp1 {
+  --badge: clamp(22px, 9.4cqh, 60px);
+  --model-height: calc(100cqh - var(--plate) - var(--badge) * .5 - 34px);
+  --delay: .62s;
+  z-index: 1;
+}
+.res-podium-place.rp2 { --delay: .46s; }
+.res-podium-model {
+  position: relative;
+  width: 124%;
+  height: var(--model-height);
+  margin: 0 -12%;
+  pointer-events: none;
+}
+.res-podium-model::before {
+  content: '';
+  position: absolute;
+  bottom: 2%;
+  left: 30%;
+  width: 40%;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, #0b294966, transparent 72%);
+}
+.rp1 .res-podium-model::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  top: 46%;
+  width: 135%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  background: repeating-conic-gradient(#ffd23c4d 0 9deg, transparent 9deg 22deg);
+  -webkit-mask-image: radial-gradient(circle, #000 8%, transparent 66%);
+  mask-image: radial-gradient(circle, #000 8%, transparent 66%);
+  animation: res-spin 28s linear infinite;
+}
+.rav3d { position: relative; display: block; width: 100%; height: 100%; }
+.res-podium-model .rav { position: absolute; left: 50%; bottom: 0; translate: -50% 0; }
+
+.res-badge {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: .08em;
+  margin: calc(var(--badge) * -.72) 0 clamp(4px, 1vh, 9px);
+  padding: .04em .42em .06em .2em;
+  border: 3px solid #fff;
+  border-radius: 12px;
+  font-size: var(--badge);
+  background: linear-gradient(165deg, var(--place-light), var(--place) 48%, var(--place-dark));
+  box-shadow: 0 5px 0 #0b1530a6, 0 10px 18px #0b153059;
+  transform: skewX(-10deg);
+}
+.res-badge > * { transform: skewX(10deg); }
+.res-badge .game-icon { width: 1.08em; height: 1.08em; vertical-align: middle; }
+.res-badge b {
+  color: #fff;
+  font-style: italic;
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: -.02em;
+  text-shadow: var(--res-stroke), 0 3px 0 #0b1530;
+}
+
+.res-plate {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  height: var(--plate);
+  padding: 4px 6px 6px;
+  text-align: center;
+}
+.res-plate::before {
+  content: '';
+  position: absolute;
+  inset: -4px 14% auto;
+  height: 4px;
+  background: var(--team, transparent);
+}
+.res-plate > div { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; max-width: 100%; }
+.res-plate b {
+  overflow: hidden;
+  font-size: clamp(13px, 2.5vh, 21px);
+  font-weight: 900;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.res-plate small {
+  max-width: 100%;
+  overflow: hidden;
+  color: #b8c9ea;
+  font-size: clamp(11px, 1.8vh, 14px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.res-podium-place.me .res-plate b { color: var(--res-gold); }
+
+.res-confetti { position: absolute; z-index: 3; inset: 0; overflow: hidden; pointer-events: none; }
+#results:not(.has-podium) .res-confetti { display: none; }
+.res-confetti i {
+  position: absolute;
+  top: -16px;
+  left: var(--x);
+  width: var(--w);
+  height: 100%;
+  animation: res-fall var(--fall) var(--wait) linear infinite both;
+}
+.res-confetti i::before {
+  content: '';
+  display: block;
+  width: 100%;
+  height: var(--h);
+  border-radius: 1px;
+  background: var(--c);
+  box-shadow: 0 0 0 .5px #0b153026;
+  animation: res-flutter var(--spin) linear infinite;
+}
+
+/* 拿不到 WebGL 时的平面小人 */
+.rav { position: relative; width: 64px; height: 76px; margin-bottom: 8px; }
+.rav i { position: absolute; left: 50%; transform: translateX(-50%); }
+.rav .body {
+  bottom: 0; width: 52px; height: 28px; border-radius: 22px 22px 6px 6px;
+  background: linear-gradient(180deg, var(--c1) 0 52%, var(--c2) 52% 68%, var(--c1) 68%);
+}
+.rav .head {
+  bottom: 22px; width: 34px; height: 34px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 58%, #1d2540 0 2.5px, transparent 3px),
+    radial-gradient(circle at 65% 58%, #1d2540 0 2.5px, transparent 3px), var(--sk);
+}
+.rav .hat { bottom: 47px; width: 38px; height: 21px; border-radius: 19px 19px 4px 4px; background: var(--hc); }
+.rav .hat::after { content: ''; position: absolute; left: 50%; top: -6px; border-radius: 50%; width: 10px; height: 10px; margin-left: -5px; background: var(--hc); }
+
+/* ---------- 底栏：本局收获（点开看明细）+ 按钮 ---------- */
+.res-foot { position: relative; flex: none; display: flex; align-items: flex-end; gap: 14px; min-width: 0; }
+#resRewards { position: relative; flex: 0 1 auto; min-width: 0; }
+#resRewards > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: clamp(36px, 6.4vh, 50px);
+  padding: 5px 14px 5px 16px;
+  border: 2px solid #ffffff30;
+  border-radius: 12px;
+  list-style: none;
+  cursor: pointer;
+  background: #0d1a3bec;
+  box-shadow: 0 4px 0 #050c1f;
+}
+#resRewards > summary::-webkit-details-marker { display: none; }
+#resRewards > summary:hover { border-color: #ffffff5c; }
+.res-gain-label { flex: none; color: var(--res-gold); font-size: 12px; font-weight: 900; letter-spacing: .08em; }
+#resRewardTotal { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 7px; min-width: 0; }
+.rg {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #ffffff14;
+  font-size: clamp(12px, 2.05vh, 16px);
+  font-weight: 900;
+  white-space: nowrap;
+}
+.rg-xp { color: #8dff6a; }
+.rg-coin { color: #9fe4ff; }
+.rg-part { color: #d7adff; }
+.rg-up { color: var(--res-navy); background: var(--res-gold); }
+.rg-lv { display: flex; align-items: center; gap: 6px; color: var(--res-pale); font-size: 12px; font-weight: 800; white-space: nowrap; }
+.rg-lv .xpbar { display: block; width: clamp(48px, 6vw, 84px); }
+.res-more { flex: none; color: #9fe4ff; font-size: 12px; font-weight: 900; white-space: nowrap; }
+.res-more::after { content: ' ▴'; }
+#resRewards[open] .res-more::after { content: ' ▾'; }
+#resReward {
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  bottom: calc(100% + 10px);
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(62vh, 430px);
+  overflow: auto;
+  padding: 10px 14px 12px;
+  border: 2px solid #ffffff3d;
+  border-radius: 14px;
+  background: #0b1530;
+  box-shadow: 0 18px 50px #000b;
+  font-size: 13px;
+  font-weight: 700;
+}
+#resReward .rl { display: flex; gap: 6px; padding: 4px 0; border-bottom: 1px solid #ffffff12; }
+#resReward .rl > span:first-child { flex: 1; }
+#resReward .rx { width: 48px; text-align: right; color: #8dff6a; }
+#resReward .rc { width: 62px; text-align: right; color: #9fe4ff; }
+#resReward .rp { width: 50px; text-align: right; color: #c9a8ff; }
+#resReward .rl.head { font-size: 12px; color: var(--res-pale); }
+#resReward .rl.head :is(.rx, .rc, .rp) { color: var(--res-pale); }
+#resReward .rl.note { font-size: 11px; color: #9bbbd1; }
+#resReward .rl.gold > span:first-child { color: var(--res-gold); }
+#resReward .rl.good > span:first-child { color: #8dff6a; }
+#resReward .rl.total { padding-top: 6px; border: 0; font-size: 16px; font-weight: 900; }
+#resReward .rl.unl { display: block; border: 0; line-height: 1.5; }
+#resReward .rlv { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+#resReward .rlv b { color: var(--res-gold); }
+#resReward .rlv .xpbar { flex: 1; }
+
+.res-foot .btnRow { flex: none; align-items: center; gap: 10px; margin: 0 0 0 auto; }
+#resBox .btn {
+  flex: none;
+  padding: clamp(7px, 1.5vh, 12px) clamp(14px, 1.6vw, 22px);
+  border-radius: 10px;
+  font-size: clamp(13px, 2.3vh, 18px);
+  box-shadow: 0 4px 0 #18265a;
+}
+#resBox #btnLobby { background: #1b2a55; box-shadow: 0 4px 0 #0b1530; }
+#resBox #btnNext {
+  width: auto;
+  min-width: clamp(150px, 17vw, 240px);
+  padding-inline: clamp(18px, 2.4vw, 34px);
+  border: 3px solid #fff;
+  font-size: clamp(16px, 3.2vh, 27px);
+  background: linear-gradient(100deg, #ff6f8f, #ff3d6e);
+  box-shadow: 0 5px 0 #a11a3e, 0 10px 26px #ff3d6e40;
+  transform: skewX(-10deg);
+}
+#resBox #btnNext:active { transform: skewX(-10deg) translateY(4px); box-shadow: 0 1px 0 #a11a3e; }
+
+/* ---------- 入场动画：标题条砸进来，榜单一行行滑入，领奖台三人依次升起、名次牌弹出 ---------- */
+#results.res-intro .res-ribbon { animation: res-slam .5s cubic-bezier(.2, .9, .25, 1.2) both; }
+#results.res-intro .rr-row { animation: res-row-in .38s calc(.18s + var(--i) * 55ms) both cubic-bezier(.2, .8, .2, 1); }
+#results.res-intro #resStage { animation: res-fade .35s .08s both; }
+#results.res-intro .res-podium-place { animation: res-rise .5s var(--delay) both cubic-bezier(.22, .8, .2, 1); }
+#results.res-intro .res-badge { animation: res-pop .46s calc(var(--delay) + .28s) both cubic-bezier(.3, 1.6, .5, 1); }
+#results.res-intro .res-foot { animation: res-up .4s .45s both; }
+@keyframes res-slam { from { opacity: 0; transform: skewX(-12deg) translateX(-70px) scale(1.12); } }
+@keyframes res-fade { from { opacity: 0; } }
+@keyframes res-row-in { from { opacity: 0; transform: translateX(-46px); } }
+@keyframes res-rise { from { opacity: 0; transform: translateY(34px); } }
+@keyframes res-pop { from { opacity: 0; transform: skewX(-10deg) scale(.3) rotate(-14deg); } }
+@keyframes res-up { from { opacity: 0; transform: translateY(16px); } }
+@keyframes res-spin { to { rotate: 360deg; } }
+@keyframes res-fall {
+  from { transform: translate3d(0, -16px, 0); }
+  to { transform: translate3d(var(--dx), 100%, 0); }
+}
+@keyframes res-flutter {
+  from { transform: rotate3d(1, .35, .2, 0deg); }
+  to { transform: rotate3d(1, .35, .2, 360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #results.res-intro :is(.res-ribbon, .rr-row, #resStage, .res-podium-place, .res-badge, .res-foot),
+  .rp1 .res-podium-model::after { animation: none; }
+  .res-confetti { display: none; }
+}
+
+/* ---------- 小屏 ---------- */
+@media (max-height: 520px) {
+  #resBox { gap: 8px; }
+  .res-ribbon { border-width: 2px; }
+  #resTitle { font-size: clamp(22px, 7vh, 34px); }
+  .rr-list > .rr-head { display: none; }
+  .res-gain-label { display: none; }
+  #resAwards { gap: 5px 6px; }
+  #resAwards > h3 { display: none; }
+  .res-award { padding: 3px 9px 3px 6px; }
+  .res-award > span { grid-row: auto; font-size: 16px; }
+  .res-award small { display: none; }
+  #resRewards > summary { gap: 7px; padding-inline: 10px; }
+}
+@media (max-width: 760px) {
+  #results.has-podium #resBody { grid-template-columns: minmax(0, 1fr); height: auto; }
+  #resStage { grid-row: 1; height: clamp(260px, 52vh, 420px); }
+  #resRanking { overflow: visible; }
+  .res-foot { flex-wrap: wrap; }
+  #resRewards { flex-basis: 100%; }
+  .res-foot .btnRow { flex-wrap: wrap; justify-content: flex-end; }
+}

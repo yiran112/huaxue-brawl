@@ -7,7 +7,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const project = JSON.parse(await readFile(resolve(root, 'wechat/project.config.json'), 'utf8'));
 const appid = process.env.WECHAT_GAME_APPID || project.appid;
 const apiOrigin = process.env.WECHAT_API_ORIGIN || '';
-const outDir = resolve(root, 'dist-wechat');
+const outDir = resolve(root, process.env.WECHAT_OUT_DIR || 'dist-wechat');
 const localProject = await readFile(resolve(outDir, 'project.config.json'), 'utf8')
   .then((source) => JSON.parse(source.replace(/^\uFEFF/, '')), (error) => {
     if (error.code !== 'ENOENT') throw error;

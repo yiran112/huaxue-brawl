@@ -9,4 +9,8 @@ import './ui/side-nav.css';
 import './ui/side-nav.css';
 
 applyGameIcons(document.body);
-window.game = new Game({ Account, UI, RaceHud, Touch });
+const preview = import.meta.env.DEV && new URLSearchParams(location.search).has('results-preview');
+window.game = new Game({ Account, UI, RaceHud, Touch, preview });
+if (preview) {
+  import('../ref/results-preview.js').then(({ previewResults }) => previewResults(window.game));
+}

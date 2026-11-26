@@ -235,7 +235,7 @@ window.__modeTest = (start, maxSec = 420) => {
     err, errs: window.__errs.slice(), state: g.state, mode: g.mode.key, track: g.trackDef ? g.trackDef.id : 'random',
     L: Math.round(g.course.L), raceTime: +g.raceTime.toFixed(1), racers: g.racers.length,
     out: g.racers.filter((r) => r.out).length, hud: maxModeHud,
-    title: txt('resTitle'), sub: txt('resSub'), rows: txt('resList'), reward: txt('resReward'),
+    title: txt('resTitle'), sub: g.ui.lastResults?.sub ?? '', rows: txt('resList'), reward: txt('resReward'),
     next: document.getElementById('btnNext').textContent,
     rep: JSON.stringify(g.rep),
   };
